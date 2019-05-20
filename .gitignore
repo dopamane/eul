@@ -20,3 +20,6 @@ cabal.project.local
 cabal.project.local~
 .HTF/
 .ghc.environment.*
+EUL.json
+EUL.asc
+EUL.bin
