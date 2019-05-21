@@ -22,7 +22,7 @@ data Spi r t
         }
 makeLenses ''Spi
 
-data Stage = Read | Write | Wait
+data Stage = Read | Write
 
 data Eul r t
   = Eul { _stage :: Stage
@@ -73,7 +73,6 @@ eulT s ss mosi = flip execState s $ do
   use stage >>= \case
     Read  -> spiRead ss mosi
     Write -> spiWrite ss
-    Wait  -> put $ Eul Read (Spi (repeat 0) (repeat 0) True)
   spi.ss' .= ss
 
 spiRead :: Bool -> Bit -> State (Eul 24 16) ()
@@ -88,7 +87,7 @@ spiWrite :: (KnownNat r, KnownNat t) => Bool -> State (Eul r t) ()
 spiWrite ss = do
   s <- use spi
   if s^.ss'.to not && ss then
-    stage .= Wait
+    put $ Eul Read (Spi (repeat 0) (repeat 0) True)
   else unless ss $ spi.tx %= flip rotateLeftS d1
 
 decode :: BitVector 24 -> Maybe (Op (Unsigned 8))
