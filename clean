@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
-rm EUL.asc EUL.bin Eul.dyn_hi Eul.dyn_o Eul.hi Eul.o EUL.json
+rm EUL.asc EUL.bin src/Eul.dyn_hi src/Eul.dyn_o src/Eul.hi src/Eul.o EUL.json
 rm -r verilog/
