@@ -34,6 +34,7 @@ makeLenses ''Eul
   (Synthesize
     { t_name = "EUL"
     , t_inputs = [ PortName "SCK"
+                 , PortName "rst"
                  , PortName "SS"
                  , PortName "MOSI"
                  ]
@@ -42,12 +43,13 @@ makeLenses ''Eul
 
 topEntity
   :: Clock DomSpi 'Source -- sck
+  -> Reset DomSpi 'Synchronous
   -> Signal DomSpi Bool   -- ss
   -> Signal DomSpi Bit    -- mosi
   -> Signal DomSpi Bit    -- miso
-topEntity sck = withClockReset sck rst eul
-  where
-    rst = unsafeToSyncReset $ pure False
+topEntity sck rst = withClockReset sck rst eul
+  --where
+    --rst = unsafeToSyncReset $ pure False
 {-# NOINLINE topEntity #-}
 
 eul
