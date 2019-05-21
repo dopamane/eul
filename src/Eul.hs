@@ -7,6 +7,8 @@ import Control.Lens ( makeLenses, to, use, (^.), (.=), (%=) )
 import Control.Monad
 import Control.Monad.State
 
+import qualified Data.List as L
+
 type DomSpi = 'Dom "Spi" 166667 -- freqCalc 6e6  (6mhz)
 
 data Op a
@@ -105,3 +107,9 @@ process = bv2v . maybe 0 ((1 ++#) . pack)
 
 calc :: BitVector 24 -> Vec 16 Bit
 calc = process . alu
+
+eulTest :: [Bit]
+eulTest = sampleN 43 $ eul ss mosi
+  where
+    ss = fromList $ [True] L.++ L.replicate 24 False L.++ [True, True] L.++ L.replicate 16 False
+    mosi = fromList $ [0, 0,0,0,0,0,0,0,1, 0,0,0,0,0,0,1,1, 0,0,0,0,0,0,0,1] L.++ L.replicate 18 0
