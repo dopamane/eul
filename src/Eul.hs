@@ -3,6 +3,8 @@ module Eul where
 
 import Clash.Prelude
 
+import Rstn (rstn)
+
 import Control.Lens ( makeLenses, to, use, (^.), (.=), (%=) )
 import Control.Monad
 import Control.Monad.State
@@ -45,15 +47,10 @@ topEntity
   -> Signal DomSpi Bool   -- ss
   -> Signal DomSpi Bit    -- mosi
   -> Signal DomSpi Bit    -- miso
-topEntity sck = withClockReset sck (unsafeToSyncReset $ rstn sck) eul
-{-# NOINLINE topEntity #-}
-
-rstn :: Clock dom gated -> Signal dom Bool
-rstn clk = notMax
+topEntity sck = withClockReset sck rst eul
   where
-    notMax = (/= maxBound) <$> rstState
-    rstState = withClockReset clk rst $ regEn (0 :: BitVector 3) notMax (rstState + 1)
-    rst = unsafeToSyncReset $ pure False
+    rst = unsafeToSyncReset $ bitToBool <$> rstn sck
+{-# NOINLINE topEntity #-}
 
 eul
   :: HiddenClockReset dom gated sync
