@@ -49,7 +49,7 @@ topEntity
   -> Signal DomSpi Bit    -- miso
 topEntity sck = withClockReset sck rst eul
   where
-    rst = unsafeToSyncReset $ bitToBool <$> rstn sck
+    rst = rstn sck
 {-# NOINLINE topEntity #-}
 
 eul
@@ -67,7 +67,7 @@ eulO s = s^.spi.tx.to head
 
 eulT :: Eul 24 16 -> Bool -> Bit -> Eul 24 16
 eulT s ss mosi = flip execState s $ do
-  use stage >>= \case
+  case s^.stage of
     Read  -> spiRead ss mosi
     Write -> spiWrite ss
   spi.ss' .= ss
