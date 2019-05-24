@@ -75,17 +75,18 @@ eulT s ss mosi = flip execState s $ do
 spiRead :: Bool -> Bit -> State (Eul 24 16) ()
 spiRead ss mosi = do
   s <- use spi
-  if s^.ss'.to not && ss then do
-    stage .= Write
-    spi.tx .= calc (s^.rx.to v2bv)
-  else unless ss $ spi.rx %= (<<+ mosi)
+  if s^.ss'.to not && ss
+    then do
+      stage .= Write
+      spi.tx .= calc (s^.rx.to v2bv)
+    else unless ss $ spi.rx %= (<<+ mosi)
 
 spiWrite :: (KnownNat r, KnownNat t) => Bool -> State (Eul r t) ()
 spiWrite ss = do
   s <- use spi
-  if s^.ss'.to not && ss then
-    put $ Eul Read (Spi (repeat 0) (repeat 0) True)
-  else unless ss $ spi.tx %= flip rotateLeftS d1
+  if s^.ss'.to not && ss
+    then put $ Eul Read (Spi (repeat 0) (repeat 0) True)
+    else unless ss $ spi.tx %= flip rotateLeftS d1
 
 decode :: BitVector 24 -> Maybe (Op (Unsigned 8))
 decode bs = case slice d23 d16 bs of
