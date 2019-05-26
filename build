@@ -2,7 +2,7 @@
 
 wax build -v Eul
 
-yosys -p "synth_ice40 -top EUL -json EUL.json" verilog/Eul/EUL/*.v
+yosys -p "synth_ice40 -top EUL -json EUL.json -dsp -abc2" verilog/Eul/EUL/*.v
 
 nextpnr-ice40 --up5k --package sg48 --pcf ICE40UP5K-B-EVN.pcf --asc EUL.asc --json EUL.json
 

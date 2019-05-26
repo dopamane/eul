@@ -49,7 +49,7 @@ topEntity
   -> Signal DomSpi Bit    -- miso
 topEntity sck = withClockReset sck rst eul
   where
-    rst = rstn sck
+    rst = rstn d100 sck
 {-# NOINLINE topEntity #-}
 
 eul
