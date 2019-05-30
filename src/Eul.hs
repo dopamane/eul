@@ -20,17 +20,9 @@ data Instr
   | PutH Addr Imm
   | PutL Addr Imm
   | Beq Addr Addr Addr
+  | Mov Addr Addr
   | Get Addr
   | Nop
-
--- Add  => 0b000 => 0
--- Sub  => 0b001 => 1
--- Mul  => 0b010 => 2
--- PutH => 0b011 => 3
--- PutL => 0b100 => 4
--- Beq  => 0b101 => 5
--- Get  => 0b110 => 6
--- Nop  => 0b111 => 7
 
 data Stage = Fetch | Execute | Write
 
@@ -100,6 +92,7 @@ execute = do
     Mul  a b c -> writeReg r c $ (r !! a) * (r !! b)
     PutH a i   -> writeReg r a (i ++# getLower (r !! a))
     PutL a i   -> writeReg r a (getHigher (r !! a) ++# i)
+    Mov a b    -> writeReg r b $ r !! a
     _          -> r
   stage .= case ins of
     Get _ -> Write
@@ -118,27 +111,6 @@ writeReg
   -> RegBank
 writeReg r i d = replace i d r
 
---   31   28   25   22   19    15               0
--- 0b[***][***][***][***][****][****************]
--- opcode|adr1|adr2|adr3|unused|immediate
-
-decode :: BitVector 32 -> Maybe Instr
-decode bs = case slice d31 d29 bs of
-  0 -> Just $ Add  addr1 addr2 addr3
-  1 -> Just $ Sub  addr1 addr2 addr3
-  2 -> Just $ Mul  addr1 addr2 addr3
-  3 -> Just $ PutH addr1 imm
-  4 -> Just $ PutL addr1 imm
-  5 -> Just $ Beq  addr1 addr2 addr3
-  6 -> Just $ Get  addr1
-  7 -> Just Nop
-  _ -> Nothing
-  where
-    addr1 = unpack $ slice d28 d26 bs
-    addr2 = unpack $ slice d25 d23 bs
-    addr3 = unpack $ slice d22 d20 bs
-    imm   = slice d15 d0 bs
-
 prog :: Vec 5 Instr
 prog =  PutL 0 5
      :> PutL 1 7
@@ -146,6 +118,23 @@ prog =  PutL 0 5
      :> Get  2
      :> Nop
      :> Nil
+
+fib :: Vec 14 Instr
+fib =  PutL 0 10 -- nth  fibonacci number 10 -> r0
+    :> PutL 1 0  -- prev prev              0 -> r1
+    :> PutL 2 1  -- prev                   1 -> r2
+    :> PutL 3 2  -- i                      2 -> r3
+    :> PutL 4 1  -- increment              1 -> r4
+    :> PutL 5 6  -- loop begin addr        6 -> r5
+    :> Add 1 2 6 -- prev prev + prev r1 + r2 -> r6 LOOP BEGIN
+    :> Mov 2 1   -- prev -> prev prev     r2 -> r1
+    :> Mov 6 2   -- fib -> prev           r6 -> r2
+    :> Add 3 4 7 -- i + 1            r3 + r4 -> r7
+    :> Mov 7 3   --                       r7 -> r3
+    :> Beq 3 0 6 -- goto LOOP BEGIN if i == n
+    :> Get 2     -- spi write
+    :> Nop       -- END
+    :> Nil
 
 {-
 sample program using narco:
