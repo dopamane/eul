@@ -9,4 +9,4 @@ set_io SCK  15
 set_io MOSI 17
 set_io MISO 14
 
-# set_io clk 35
+set_io clk 35
