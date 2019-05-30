@@ -11,6 +11,7 @@ import Spi  ( spiWorker )
 data Op a
   = Add a a
   | Sub a a
+  | Mul a a
 
 data Stage = Read | Write
 
@@ -61,6 +62,7 @@ decode :: BitVector 24 -> Maybe (Op (Unsigned 8))
 decode bs = case slice d23 d16 bs of
   0 -> Just $ Add operand1 operand2
   1 -> Just $ Sub operand1 operand2
+  2 -> Just $ Mul operand1 operand2
   _ -> Nothing
   where
     operand1 = unpack $ slice d15 d8 bs
@@ -70,6 +72,7 @@ execute :: Num a => Op a -> a
 execute = \case
   Add a b -> a + b
   Sub a b -> a - b
+  Mul a b -> a * b
 
 alu :: BitVector 24 -> Maybe (Unsigned 8)
 alu = fmap execute . decode
