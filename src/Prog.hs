@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+import Control.Monad      ( forM_ )
 import Control.Concurrent ( threadDelay )
 import Data.Word          ( Word8, Word16 )
 import Data.Bits          ( Bits, shiftL, shiftR, (.|.), (.&.) )
@@ -18,8 +19,8 @@ data Instr
 prog :: [Instr]
 prog
   =  [ PutL 0 5
-     , PutL 1 7
-     , Add  0 1 2
+     , PutL 1 5
+     , Mul  0 1 2
      , Get 2
      ]
 

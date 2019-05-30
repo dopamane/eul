@@ -2,3 +2,4 @@
 
 rm EUL.asc EUL.bin src/*.dyn_hi src/*.dyn_o src/*.hi src/*.o EUL.json
 rm -r verilog/
+rm src/Prog
