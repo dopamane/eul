@@ -3,17 +3,41 @@ module Eul where
 
 import Clash.Prelude
 
+import Control.Lens ( makeLenses, use, (^.), (.=) )
+import Control.Monad.State 
+import Data.Maybe ( isJust, fromMaybe )
+
 import Rstn ( rstn )
 import Spi  ( spiWorker )
 
---import qualified Data.List as L
+type Addr    = Index 8
+type Reg     = BitVector 32
+type RegBank = Vec 8 Reg
+type Imm     = BitVector 16
 
-data Op a
-  = Add a a
-  | Sub a a
-  | Mul a a
+data Instr
+  = Add Addr Addr Addr
+  | Sub Addr Addr Addr
+  | Mul Addr Addr Addr
+  | PutH Addr Imm
+  | PutL Addr Imm
+  | Get Addr
 
-data Stage = Read | Write
+-- Add  => 0b000 => 0
+-- Sub  => 0b001 => 1
+-- Mul  => 0b010 => 2
+-- putH => 0b011 => 3 
+-- putL => 0b100 => 4
+-- Get  => 0b101 => 5
+
+data Stage = Fetch | Execute | Write
+
+data Eul = Eul
+  { _instr :: Instr
+  , _stage :: Stage
+  , _regs  :: RegBank
+  }
+makeLenses ''Eul
 
 {-# ANN topEntity
   (Synthesize
@@ -25,7 +49,6 @@ data Stage = Read | Write
                  ]
     , t_output = PortName "MISO"
     })#-}
-
 topEntity
   :: Clock System 'Source -- clk
   -> Signal System Bit    -- sck
@@ -46,47 +69,72 @@ eul
 eul sck ss mosi = miso
   where
     (miso, ack, rx) = spiWorker txLd sck ss mosi
-    txLd = mealyB eulT initial (ack, rx)
-    initial = (Read, 0 :: BitVector 16)
+    txLd = mooreB eulT writeBack initial (ack, rx)
+    initial = Eul (Get 0) Fetch $ repeat 0
+
+writeBack :: Eul -> Maybe (BitVector 32)
+writeBack Eul{_instr=(Get i), _stage=Write, _regs=r} = Just $ r !! i
+writeBack _ = Nothing
 
 eulT
-  :: (Stage, BitVector 16)
-  -> (Bool, Maybe (BitVector 24))
-  -> ((Stage, BitVector 16), Maybe (BitVector 16))
-eulT (Read, _) (_, Nothing) = ((Read, 0), Nothing)
-eulT (Read, _) (_, Just r) = ((Write, calc r), Nothing)
-eulT (Write, w) (False, _) = ((Write, w), Just w)
-eulT (Write, w) (True, _)  = ((Read, 0), Just w)
+  :: Eul
+  -> (Bool, Maybe (BitVector 32))
+  -> Eul
+eulT s (ack, rx) = flip execState s $ case s^.stage of
+  Fetch   -> fetch rx
+  Execute -> execute
+  Write   -> when ack $ stage .= Fetch 
+    
+fetch :: Maybe (BitVector 32) -> State Eul ()
+fetch Nothing = return ()
+fetch (Just rx) = do
+  let decoded = decode rx
+  instr .= fromMaybe (Get 0) decoded
+  when (isJust decoded) $ stage .= Execute  
 
-decode :: BitVector 24 -> Maybe (Op (Unsigned 8))
-decode bs = case slice d23 d16 bs of
-  0 -> Just $ Add operand1 operand2
-  1 -> Just $ Sub operand1 operand2
-  2 -> Just $ Mul operand1 operand2
+execute :: State Eul ()
+execute = do
+  r <- use regs
+  ins <- use instr
+  regs .= case ins of
+    Add  a b c -> writeReg r c $ (r !! a) + (r !! b)
+    Sub  a b c -> writeReg r c $ (r !! a) - (r !! b)
+    Mul  a b c -> writeReg r c $ (r !! a) * (r !! b)
+    PutH a i   -> writeReg r a (i ++# getLower (r !! a))
+    PutL a i   -> writeReg r a (getHigher (r !! a) ++# i) 
+    _          -> r
+  stage .= case ins of
+    Get _ -> Write
+    _     -> Fetch
+  where
+    getHigher = slice d31 d16
+    getLower  = slice d15 d0
+
+writeReg
+  :: RegBank
+  -> Addr
+  -> Reg
+  -> RegBank
+writeReg r i d = replace i d r
+
+--   31   28   25   22   19    15               0
+-- 0b[***][***][***][***][****][****************]
+-- opcode|adr1|adr2|adr3|unused|immediate 
+
+decode :: BitVector 32 -> Maybe Instr
+decode bs = case slice d31 d29 bs of
+  0 -> Just $ Add  addr1 addr2 addr3
+  1 -> Just $ Sub  addr1 addr2 addr3
+  2 -> Just $ Mul  addr1 addr2 addr3
+  3 -> Just $ PutH addr1 imm
+  4 -> Just $ PutL addr1 imm
+  5 -> Just $ Get  addr1 
   _ -> Nothing
   where
-    operand1 = unpack $ slice d15 d8 bs
-    operand2 = unpack $ slice d7  d0 bs
+    addr1 = unpack $ slice d28 d26 bs
+    addr2 = unpack $ slice d25 d23 bs
+    addr3 = unpack $ slice d22 d20 bs
+    imm   = slice d15 d0 bs
 
-execute :: Num a => Op a -> a
-execute = \case
-  Add a b -> a + b
-  Sub a b -> a - b
-  Mul a b -> a * b
 
-alu :: BitVector 24 -> Maybe (Unsigned 8)
-alu = fmap execute . decode
 
-process :: Maybe (Unsigned 8) -> BitVector 16
-process = maybe 0 ((1 ++#) . pack)
-
-calc :: BitVector 24 -> BitVector 16
-calc = process . alu
-
-{-
-eulTest :: [Bit]
-eulTest = sampleN 43 $ eul ss mosi
-  where
-    ss = fromList $ [True] L.++ L.replicate 24 False L.++ [True, True] L.++ L.replicate 16 False
-    mosi = fromList $ [0, 0,0,0,0,0,0,0,1, 0,0,0,0,0,0,1,1, 0,0,0,0,0,0,0,1] L.++ L.replicate 18 0
--}
