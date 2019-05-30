@@ -19,7 +19,7 @@ data Instr
   | Mul Addr Addr Addr
   | PutH Addr Imm
   | PutL Addr Imm
-  | Beq Addr Addr Addr
+  | Bne Addr Addr Addr
   | Mov Addr Addr
   | Get Addr
   | Nop
@@ -48,7 +48,7 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul prog)
+topEntity clk = withClockReset clk rst (eul fib)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
@@ -98,7 +98,7 @@ execute = do
     Get _ -> Write
     _     -> Fetch
   case ins of
-    Beq a b pcRegAddr | (r !! a) == (r !! b) -> pc .= unpack (resize $ r !! pcRegAddr)
+    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> pc .= unpack (resize $ r !! pcRegAddr)
     _  -> unless (curPC == maxBound) $ pc += 1
   where
     getHigher = slice d31 d16
@@ -120,7 +120,7 @@ prog =  PutL 0 5
      :> Nil
 
 fib :: Vec 14 Instr
-fib =  PutL 0 10 -- nth  fibonacci number 10 -> r0
+fib =  PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> PutL 1 0  -- prev prev              0 -> r1
     :> PutL 2 1  -- prev                   1 -> r2
     :> PutL 3 2  -- i                      2 -> r3
@@ -131,21 +131,9 @@ fib =  PutL 0 10 -- nth  fibonacci number 10 -> r0
     :> Mov 6 2   -- fib -> prev           r6 -> r2
     :> Add 3 4 7 -- i + 1            r3 + r4 -> r7
     :> Mov 7 3   --                       r7 -> r3
-    :> Beq 3 0 6 -- goto LOOP BEGIN if i == n
+    :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
     :> Nop       -- END
     :> Nil
 
-{-
-sample program using narco:
-PutL 0 5   = 0b100 000 00 0x00 0x00 0x05      = 0x80 0x00 0x00 0x05
-PutL 1 7   = 0b100 001 00 0x00 0x00 0x07      = 0x84 0x00 0x00 0x07
-Add  0 1 2 = 0b000 000 001 010 **** 0x00 0x00 = 0x00 0xa0 0x00 0x00
-Get  2     = 0b101 010 00 0x00 0x00 0x00      = 0xa8 0x00 0x00 0x00
 
-narco -WB 0x80 0x00 0x00 0x05
-narco -WB 0x84 0x00 0x00 0x07
-narco -WB 0x00 0xa0 0x00 0x00
-narco -WB 0xa8 0x00 0x00 0x00
-narco -RB 4 = 0x00 0x00 0x00 0x0c
--}
