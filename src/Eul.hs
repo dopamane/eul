@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 module Eul where
 
 import Clash.Prelude
