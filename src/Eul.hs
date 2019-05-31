@@ -84,15 +84,16 @@ fetch branch stall = unless stall $ pc %= updatePC branch
 execute :: KnownNat n => Instr -> Bool -> State (Eul n) (Maybe (Unsigned n))
 execute ins stall = do
   r     <- use regs
-  instr .= ins
-  unless stall $ regs %= case ins of
-    Add  a b c -> replace c $ (r !! a) + (r !! b)
-    Sub  a b c -> replace c $ (r !! a) - (r !! b)
-    Mul  a b c -> replace c $ (r !! a) * (r !! b)
-    PutH a i   -> replace a $ i ++# getLower (r !! a)
-    PutL a i   -> replace a $ getHigher (r !! a) ++# i
-    Mov a b    -> replace b $ r !! a
-    _          -> id
+  unless stall $ do
+    instr .= ins
+    regs %= case ins of
+      Add  a b c -> replace c $ (r !! a) + (r !! b)
+      Sub  a b c -> replace c $ (r !! a) - (r !! b)
+      Mul  a b c -> replace c $ (r !! a) * (r !! b)
+      PutH a i   -> replace a $ i ++# getLower (r !! a)
+      PutL a i   -> replace a $ getHigher (r !! a) ++# i
+      Mov a b    -> replace b $ r !! a
+      _          -> id
   return $ case ins of
     Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
     _  -> Nothing
