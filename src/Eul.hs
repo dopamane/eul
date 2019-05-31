@@ -6,6 +6,7 @@ import Control.Lens ( makeLenses, use, (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust )
 import Data.Tuple ( swap )
+import Data.Bool ( bool )
 
 import Rstn ( rstn )
 import Spi  ( spiWorkerTx )
@@ -69,7 +70,7 @@ eul romContent sck ss = miso
     (txLd, romAddr, rdAddr, wrM) = mealyB eulT initial (ack, romValue, memValue)
     initial = Eul Nop (replicate d8 0) 0
     romValue = romPow2 romContent romAddr
-    memValue = readNew (blockRamPow2 (replicate d256 0)) rdAddr wrM
+    memValue = readNew (blockRamPow2 (replicate d256 0)) (delay rdAddr) wrM
 
 eulT
   :: (KnownNat n, KnownNat m, KnownNat p)
@@ -91,9 +92,7 @@ fetch stall branch romValue = do
   curPC <- use pc
   unless stall $ do
     pc %= updatePC branch
-    exir .= if isJust branch
-      then Nop
-      else romValue
+    exir .= bool romValue Nop (isJust branch)
   return (curPC, rdAddr)
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
@@ -117,14 +116,14 @@ execute ack ramValue = do
     Mul  a b c -> replace c $ (r !! a) * (r !! b)
     PutH a i   -> replace a $ i ++# getLower (r !! a)
     PutL a i   -> replace a $ getHigher (r !! a) ++# i
-    Mov a b    -> replace b $ r !! a
+    Mov  a b   -> replace b $ r !! a
     Load a _   -> replace a ramValue
     _          -> id
   return $ case instr of
-    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> (False, Nothing, Just $ unpack $ resize $ r !! pcRegAddr, Nothing)
+    Bne a b pc' | (r !! a) /= (r !! b) -> (False, Nothing, Just $ unpack $ resize $ r !! pc', Nothing)
     Store a m -> (False, Nothing, Nothing, Just (m, r !! a))
     Get a | not ack -> (True, Just $ r !! a, Nothing, Nothing)
-    _  -> (False, Nothing, Nothing, Nothing)
+    _ -> (False, Nothing, Nothing, Nothing)
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
