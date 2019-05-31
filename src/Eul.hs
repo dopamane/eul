@@ -82,21 +82,23 @@ fetch branch stall = unless stall $ pc %= updatePC branch
     updatePC (Just b) _  = b
 
 execute :: KnownNat n => Instr -> Bool -> State (Eul n) (Maybe (Unsigned n))
-execute ins stall = do
-  r     <- use regs
-  unless stall $ do
-    instr .= ins
-    regs %= case ins of
-      Add  a b c -> replace c $ (r !! a) + (r !! b)
-      Sub  a b c -> replace c $ (r !! a) - (r !! b)
-      Mul  a b c -> replace c $ (r !! a) * (r !! b)
-      PutH a i   -> replace a $ i ++# getLower (r !! a)
-      PutL a i   -> replace a $ getHigher (r !! a) ++# i
-      Mov a b    -> replace b $ r !! a
-      _          -> id
-  return $ case ins of
-    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
-    _  -> Nothing
+execute romValue stall = do
+  r <- use regs
+  if not stall
+    then do
+      instr .= romValue
+      regs %= case romValue of
+        Add  a b c -> replace c $ (r !! a) + (r !! b)
+        Sub  a b c -> replace c $ (r !! a) - (r !! b)
+        Mul  a b c -> replace c $ (r !! a) * (r !! b)
+        PutH a i   -> replace a $ i ++# getLower (r !! a)
+        PutL a i   -> replace a $ getHigher (r !! a) ++# i
+        Mov a b    -> replace b $ r !! a
+        _          -> id
+      return $ case romValue of
+        Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
+        _  -> Nothing
+    else return Nothing
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
