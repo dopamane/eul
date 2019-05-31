@@ -2,7 +2,7 @@ module Eul where
 
 import Clash.Prelude
 
-import Control.Lens ( makeLenses, use, to, (^.), (.=), (+=), (%=) )
+import Control.Lens ( makeLenses, use, (^.), (.=), (+=), (%=) )
 import Control.Monad.State
 
 import Rstn ( rstn )
@@ -30,7 +30,7 @@ data Eul n = Eul
   { _instr :: Instr
   , _stage :: Stage
   , _regs  :: RegBank
-  , _pc    :: Index n
+  , _pc    :: Unsigned n
   }
 makeLenses ''Eul
 
@@ -55,37 +55,33 @@ topEntity clk = withClockReset clk rst (eul fib)
 
 eul
   :: HiddenClockReset dom gated sync
-  => (KnownNat n, 1 <= n)
-  => Vec n Instr
+  => KnownNat n
+  => Vec (2^n) Instr
   -> Signal dom Bit
   -> Signal dom Bool
   -> Signal dom Bit
 eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
-    txLd = moore (eulT romContent) writeBack initial ack
+    (txLd, romAddr) = mooreB eulT eulO initial (ack, romValue)
     initial = Eul Nop Fetch (repeat 0) 0
+    romValue = romPow2 romContent romAddr
 
-writeBack :: Eul n -> Maybe (BitVector 32)
-writeBack Eul{_instr=(Get i), _stage=Write, _regs=r} = Just $ r !! i
-writeBack _ = Nothing
+eulO :: Eul n -> (Maybe (BitVector 32), Unsigned n)
+eulO s@Eul{_instr=(Get i), _stage=Write, _regs=r} = (Just $ r !! i, _pc s)
+eulO s = (Nothing, _pc s)
 
-eulT :: (KnownNat n, 1 <= n) => Vec n Instr -> Eul n -> Bool -> Eul n
-eulT romContent s ack = flip execState s $ case s^.stage of
-  Fetch   -> s^.pc.to (fetch romContent)
-  Execute -> execute
+eulT :: KnownNat n => Eul n -> (Bool, Instr) -> Eul n
+eulT s (ack, romValue) = flip execState s $ case s^.stage of
+  Fetch   -> stage .= Execute
+  Execute -> execute romValue
   Write   -> when ack $ stage .= Fetch
 
-fetch :: KnownNat n => Vec n Instr -> Index n -> State (Eul n) ()
-fetch romContent instrAddr = do
-  instr .= asyncRom romContent instrAddr
-  stage .= Execute
-
-execute :: (KnownNat n, 1 <= n) => State (Eul n) ()
-execute = do
+execute :: KnownNat n => Instr -> State (Eul n) ()
+execute ins = do
   r     <- use regs
-  ins   <- use instr
   curPC <- use pc
+  instr .= ins
   regs %= case ins of
     Add  a b c -> replace c $ (r !! a) + (r !! b)
     Sub  a b c -> replace c $ (r !! a) - (r !! b)
@@ -104,15 +100,15 @@ execute = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-prog :: Vec 5 Instr
+prog :: Vec 8 Instr
 prog =  PutL 0 5
      :> PutL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nop
-     :> Nil
+     :> Nil ++ repeat Nop
 
-fib :: Vec 14 Instr
+fib :: Vec 16 Instr
 fib =  PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> PutL 1 0  -- prev prev              0 -> r1
     :> PutL 2 1  -- prev                   1 -> r2
@@ -127,4 +123,4 @@ fib =  PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
     :> Nop       -- END
-    :> Nil
+    :> Nil ++ repeat Nop
