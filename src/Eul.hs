@@ -25,9 +25,10 @@ data Instr
   | Nop
 
 data Eul n = Eul
-  { _instr :: Instr
-  , _regs  :: RegBank
-  , _pc    :: Unsigned n
+  { _exir :: Instr
+  , _wir  :: Instr
+  , _regs :: RegBank
+  , _pc   :: Unsigned n
   }
 makeLenses ''Eul
 
@@ -45,7 +46,7 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul fib)
+topEntity clk = withClockReset clk rst (eul prog)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
@@ -61,52 +62,53 @@ eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
     (txLd, romAddr) = mooreB eulT eulO initial (ack, romValue)
-    initial = Eul Nop (repeat 0) 0
+    initial = Eul Nop Nop (repeat 0) 0
     romValue = romPow2 romContent romAddr
 
 eulO :: Eul n -> (Maybe (BitVector 32), Unsigned n)
-eulO s@Eul{_instr=(Get i), _regs=r} = (Just $ r !! i, _pc s)
+eulO s@Eul{_wir=(Get i), _regs=r} = (Just $ r !! i, _pc s)
 eulO s = (Nothing, _pc s)
 
 eulT :: KnownNat n => Eul n -> (Bool, Instr) -> Eul n
 eulT s (ack, romValue) = flip execState s $ do
   stall <- write ack
-  branch <- execute romValue stall
-  fetch branch stall
+  branch <- execute stall
+  fetch stall branch romValue
 
-fetch :: KnownNat n => Maybe (Unsigned n) -> Bool -> State (Eul n) ()
-fetch branch stall = unless stall $ pc %= updatePC branch
+fetch :: KnownNat n => Bool -> Maybe (Unsigned n) -> Instr -> State (Eul n) ()
+fetch stall branch romValue = unless stall $ do
+  pc %= updatePC branch
+  exir .= romValue
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
     updatePC (Just b) _  = b
 
-execute :: KnownNat n => Instr -> Bool -> State (Eul n) (Maybe (Unsigned n))
-execute romValue stall = do
+execute :: KnownNat n => Bool -> State (Eul n) (Maybe (Unsigned n))
+execute stall = do
   r <- use regs
-  if not stall
-    then do
-      instr .= romValue
-      regs %= case romValue of
-        Add  a b c -> replace c $ (r !! a) + (r !! b)
-        Sub  a b c -> replace c $ (r !! a) - (r !! b)
-        Mul  a b c -> replace c $ (r !! a) * (r !! b)
-        PutH a i   -> replace a $ i ++# getLower (r !! a)
-        PutL a i   -> replace a $ getHigher (r !! a) ++# i
-        Mov a b    -> replace b $ r !! a
-        _          -> id
-      return $ case romValue of
-        Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
-        _  -> Nothing
-    else return Nothing
+  instr <- use exir
+  unless stall $ do
+    wir .= instr
+    regs %= case instr of
+      Add  a b c -> replace c $ (r !! a) + (r !! b)
+      Sub  a b c -> replace c $ (r !! a) - (r !! b)
+      Mul  a b c -> replace c $ (r !! a) * (r !! b)
+      PutH a i   -> replace a $ i ++# getLower (r !! a)
+      PutL a i   -> replace a $ getHigher (r !! a) ++# i
+      Mov a b    -> replace b $ r !! a
+      _          -> id
+  return $ case instr of
+    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
+    _  -> Nothing
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
 write :: Bool -> State (Eul n) Bool
 write ack = do
-  ins <- use instr
-  return $ case ins of
+  instr <- use wir
+  return $ case instr of
     Get _ | not ack -> True
     _ -> False
 
