@@ -4,6 +4,7 @@ import Clash.Prelude
 
 import Control.Lens ( makeLenses, use, (.=), (%=) )
 import Control.Monad.State
+import Data.Maybe ( isJust )
 
 import Rstn ( rstn )
 import Spi  ( spiWorkerTx )
@@ -78,7 +79,9 @@ eulT s (ack, romValue) = flip execState s $ do
 fetch :: KnownNat n => Bool -> Maybe (Unsigned n) -> Instr -> State (Eul n) ()
 fetch stall branch romValue = unless stall $ do
   pc %= updatePC branch
-  exir .= romValue
+  exir .= if isJust branch
+    then Nop
+    else romValue
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
@@ -137,4 +140,5 @@ fib =  Nop
     :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
     :> Nop       -- END
-    :> Nil ++ repeat Nop
+    :> Nop
+    :> Nil
