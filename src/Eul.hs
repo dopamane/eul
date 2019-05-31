@@ -46,7 +46,7 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul prog)
+topEntity clk = withClockReset clk rst (eul fib)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
@@ -128,7 +128,7 @@ fib =  Nop
     :> PutL 2 1  -- prev                   1 -> r2
     :> PutL 3 2  -- i                      2 -> r3
     :> PutL 4 1  -- increment              1 -> r4
-    :> PutL 5 7  -- loop begin addr        6 -> r5
+    :> PutL 5 7  -- loop begin addr        7 -> r5
     :> Add 1 2 6 -- prev prev + prev r1 + r2 -> r6 LOOP BEGIN
     :> Mov 2 1   -- prev -> prev prev     r2 -> r1
     :> Mov 6 2   -- fib -> prev           r6 -> r2
