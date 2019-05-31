@@ -113,7 +113,8 @@ write ack = do
     _ -> False
 
 prog :: Vec 8 Instr
-prog =  PutL 0 5
+prog =  Nop
+     :> PutL 0 5
      :> PutL 1 7
      :> Add  0 1 2
      :> Get  2
@@ -121,7 +122,8 @@ prog =  PutL 0 5
      :> Nil ++ repeat Nop
 
 fib :: Vec 16 Instr
-fib =  PutL 0 29 -- nth  fibonacci number 10 -> r0
+fib =  Nop
+    :> PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> PutL 1 0  -- prev prev              0 -> r1
     :> PutL 2 1  -- prev                   1 -> r2
     :> PutL 3 2  -- i                      2 -> r3
