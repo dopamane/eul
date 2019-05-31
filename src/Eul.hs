@@ -2,7 +2,7 @@ module Eul where
 
 import Clash.Prelude
 
-import Control.Lens ( makeLenses, use, to, (^.), (.=), (+=) )
+import Control.Lens ( makeLenses, use, to, (^.), (.=), (+=), (%=) )
 import Control.Monad.State
 
 import Rstn ( rstn )
@@ -86,14 +86,14 @@ execute = do
   r     <- use regs
   ins   <- use instr
   curPC <- use pc
-  regs .= case ins of
-    Add  a b c -> writeReg r c $ (r !! a) + (r !! b)
-    Sub  a b c -> writeReg r c $ (r !! a) - (r !! b)
-    Mul  a b c -> writeReg r c $ (r !! a) * (r !! b)
-    PutH a i   -> writeReg r a (i ++# getLower (r !! a))
-    PutL a i   -> writeReg r a (getHigher (r !! a) ++# i)
-    Mov a b    -> writeReg r b $ r !! a
-    _          -> r
+  regs %= case ins of
+    Add  a b c -> replace c $ (r !! a) + (r !! b)
+    Sub  a b c -> replace c $ (r !! a) - (r !! b)
+    Mul  a b c -> replace c $ (r !! a) * (r !! b)
+    PutH a i   -> replace a $ i ++# getLower (r !! a)
+    PutL a i   -> replace a $ getHigher (r !! a) ++# i
+    Mov a b    -> replace b $ r !! a
+    _          -> id
   stage .= case ins of
     Get _ -> Write
     _     -> Fetch
@@ -103,13 +103,6 @@ execute = do
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
-
-writeReg
-  :: RegBank
-  -> Addr
-  -> Reg
-  -> RegBank
-writeReg r i d = replace i d r
 
 prog :: Vec 5 Instr
 prog =  PutL 0 5
@@ -135,5 +128,3 @@ fib =  PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> Get 2     -- spi write
     :> Nop       -- END
     :> Nil
-
-
