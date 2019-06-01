@@ -174,6 +174,7 @@ ramTest =  Nop
         :> Store 0 1
         :> Load 0 0
         :> Load 1 1
+        :> Nop
         :> Add 0 1 2
         :> Get 2
         :> Nil ++ repeat Nop
