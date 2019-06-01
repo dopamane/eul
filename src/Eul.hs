@@ -109,11 +109,11 @@ execute
    -> Maybe (Addr n, Reg)
    -> State (Eul n m p) (Maybe (PC p), Bool)
 execute ack ldReg = do
-  r <- use regs
   instr <- use exir
   regs %= case ldReg of
     Just (a, i) -> replace a i
     _ -> id
+  r <- use regs    
   regs %= case instr of
     Add  a b c -> replace c $ (r !! a) + (r !! b)
     Sub  a b c -> replace c $ (r !! a) - (r !! b)
@@ -174,7 +174,6 @@ ramTest =  Nop
         :> Store 0 1
         :> Load 0 0
         :> Load 1 1
-        :> Nop
         :> Add 0 1 2
         :> Get 2
         :> Nil ++ repeat Nop
