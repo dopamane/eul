@@ -18,16 +18,16 @@ type PC p      = Unsigned p
 type Ram m     = Unsigned m
 
 data Instr n m
-  = Add   (Addr n) (Addr n) (Addr n)
-  | Sub   (Addr n) (Addr n) (Addr n)
-  | Mul   (Addr n) (Addr n) (Addr n)
-  | PutH  (Addr n) Imm
-  | PutL  (Addr n) Imm
-  | Bne   (Addr n) (Addr n) (Addr n)
-  | Mov   (Addr n) (Addr n)
-  | Get   (Addr n)
-  | Load  (Addr n) (Ram m)
-  | Store (Addr n) (Ram m)
+  = Add    (Addr n) (Addr n) (Addr n)
+  | Sub    (Addr n) (Addr n) (Addr n)
+  | Mul    (Addr n) (Addr n) (Addr n)
+  | LoadIH (Addr n) Imm
+  | LoadIL (Addr n) Imm
+  | Bne    (Addr n) (Addr n) (Addr n)
+  | Mov    (Addr n) (Addr n)
+  | Get    (Addr n)
+  | Load   (Addr n) (Ram m)
+  | Store  (Addr n) (Ram m)
   | Nop
 
 data Eul n m p = Eul
@@ -115,13 +115,13 @@ execute ack ldReg = do
     _ -> id
   r <- use regs
   regs %= case instr of
-    Add  a b c -> replace c $ (r !! a) + (r !! b)
-    Sub  a b c -> replace c $ (r !! a) - (r !! b)
-    Mul  a b c -> replace c $ (r !! a) * (r !! b)
-    PutH a i   -> replace a $ i ++# getLower (r !! a)
-    PutL a i   -> replace a $ getHigher (r !! a) ++# i
-    Mov a b    -> replace b $ r !! a
-    _          -> id
+    Add    a b c -> replace c $ (r !! a) + (r !! b)
+    Sub    a b c -> replace c $ (r !! a) - (r !! b)
+    Mul    a b c -> replace c $ (r !! a) * (r !! b)
+    LoadIH a i   -> replace a $ i ++# getLower (r !! a)
+    LoadIL a i   -> replace a $ getHigher (r !! a) ++# i
+    Mov    a b   -> replace b $ r !! a
+    _  -> id
   memir .= instr
   return $ case instr of
     Bne a b pcRegAddr | (r !! a) /= (r !! b) -> (Just $ unpack $ resize $ r !! pcRegAddr, False)
@@ -140,8 +140,8 @@ memory ramValue = do
 
 prog :: Vec 8 (Instr 8 8)
 prog =  Nop
-     :> PutL 0 5
-     :> PutL 1 7
+     :> LoadIL 0 5
+     :> LoadIL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nop
@@ -149,12 +149,12 @@ prog =  Nop
 
 fib :: Vec 16 (Instr 8 8)
 fib =  Nop
-    :> PutL 0 29 -- nth  fibonacci number 10 -> r0
-    :> PutL 1 0  -- prev prev              0 -> r1
-    :> PutL 2 1  -- prev                   1 -> r2
-    :> PutL 3 2  -- i                      2 -> r3
-    :> PutL 4 1  -- increment              1 -> r4
-    :> PutL 5 7  -- loop begin addr        7 -> r5
+    :> LoadIL 0 29 -- nth  fibonacci number 10 -> r0
+    :> LoadIL 1 0  -- prev prev              0 -> r1
+    :> LoadIL 2 1  -- prev                   1 -> r2
+    :> LoadIL 3 2  -- i                      2 -> r3
+    :> LoadIL 4 1  -- increment              1 -> r4
+    :> LoadIL 5 7  -- loop begin addr        7 -> r5
     :> Add 1 2 6 -- prev prev + prev r1 + r2 -> r6 LOOP BEGIN
     :> Mov 2 1   -- prev -> prev prev     r2 -> r1
     :> Mov 6 2   -- fib -> prev           r6 -> r2
@@ -168,9 +168,9 @@ fib =  Nop
 
 ramTest :: Vec 16 (Instr 8 8)
 ramTest =  Nop
-        :> PutL 0 5
+        :> LoadIL 0 5
         :> Store 0 0
-        :> PutL 0 4
+        :> LoadIL 0 4
         :> Store 0 1
         :> Load 0 0
         :> Load 1 1
@@ -180,8 +180,8 @@ ramTest =  Nop
 
 ramReadNew :: Vec 8 (Instr 8 8)
 ramReadNew =  Nop
-           :> PutL 0 5
-           :> PutL 1 3
+           :> LoadIL 0 5
+           :> LoadIL 1 3
            :> Add 0 1 2
            :> Store 2 0
            :> Load 0 0
