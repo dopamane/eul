@@ -32,9 +32,10 @@ data Instr n m
   | Nop
 
 data Eul n m p = Eul
-  { _exir :: Instr n m
-  , _regs :: RegBank n
-  , _pc   :: Unsigned p
+  { _exir  :: Instr n m
+  , _memir :: Instr n m
+  , _regs  :: RegBank n
+  , _pc    :: Unsigned p
   }
 makeLenses ''Eul
 
@@ -68,9 +69,9 @@ eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
     (txLd, romAddr, rdAddr, wrM) = mealyB eulT initial (ack, romValue, memValue)
-    initial = Eul Nop (replicate d8 0) 0
+    initial = Eul Nop Nop (replicate d8 0) 0
     romValue = romPow2 romContent romAddr
-    memValue = readNew (blockRamPow2 (replicate d256 0)) (delay rdAddr) wrM
+    memValue = readNew (blockRamPow2 (replicate d256 0)) rdAddr wrM
 
 eulT
   :: (KnownNat n, KnownNat m, KnownNat p)
@@ -78,8 +79,9 @@ eulT
   -> (Bool, Instr n m, Reg)
   -> (Eul n m p, (Maybe Reg, Rom p, Ram m, Maybe (Ram m, Reg)))
 eulT s (ack, romValue, ramValue) = swap $ flip runState s $ do
-  (stall, spiTx, branch, wrM) <- execute ack ramValue
-  (nextPC, rdAddr) <- fetch stall branch romValue
+  (wrM, ldReg) <- memory ramValue
+  (stall, spiTx, branch, rdAddr) <- execute ack ldReg
+  nextPC <- fetch stall branch romValue
   return (spiTx, nextPC, rdAddr, wrM)
 
 fetch
@@ -87,29 +89,29 @@ fetch
   => Bool
   -> Maybe (Rom p)
   -> Instr n m
-  -> State (Eul n m p) (Rom p, Ram m)
+  -> State (Eul n m p) (Rom p)
 fetch stall branch romValue = do
   curPC <- use pc
   unless stall $ do
     pc %= updatePC branch
     exir .= bool romValue Nop (isJust branch)
-  return (curPC, rdAddr)
+  return curPC
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
     updatePC (Just b) _  = b
-    rdAddr = case romValue of
-      Load _ m -> m
-      _ -> 0
 
 execute
-  :: (KnownNat n, KnownNat p)
+  :: (KnownNat n, KnownNat m, KnownNat p)
   => Bool
-  -> Reg
-  -> State (Eul n m p) (Bool, Maybe Reg, Maybe (Rom p), Maybe (Ram m, Reg))
-execute ack ramValue = do
+  -> Maybe (Addr n, Reg)
+  -> State (Eul n m p) (Bool, Maybe Reg, Maybe (Rom p), Ram m)
+execute ack ldReg = do
   r <- use regs
   instr <- use exir
+  regs %= case ldReg of
+    Just (a, i) -> replace a i
+    Nothing     -> id
   regs %= case instr of
     Add  a b c -> replace c $ (r !! a) + (r !! b)
     Sub  a b c -> replace c $ (r !! a) - (r !! b)
@@ -117,16 +119,28 @@ execute ack ramValue = do
     PutH a i   -> replace a $ i ++# getLower (r !! a)
     PutL a i   -> replace a $ getHigher (r !! a) ++# i
     Mov  a b   -> replace b $ r !! a
-    Load a _   -> replace a ramValue
     _          -> id
+  memir .= instr
   return $ case instr of
-    Bne a b pc' | (r !! a) /= (r !! b) -> (False, Nothing, Just $ unpack $ resize $ r !! pc', Nothing)
-    Store a m -> (False, Nothing, Nothing, Just (m, r !! a))
-    Get a | not ack -> (True, Just $ r !! a, Nothing, Nothing)
-    _ -> (False, Nothing, Nothing, Nothing)
+    Bne a b pc' | (r !! a) /= (r !! b) -> (False, Nothing, Just $ unpack $ resize $ r !! pc', 0)
+    Load _ m -> (False, Nothing, Nothing, m)
+    Get a | not ack -> (True, Just $ r !! a, Nothing, 0)
+    _ -> (False, Nothing, Nothing, 0)
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
+
+memory
+  :: KnownNat n
+  => Reg
+  -> State (Eul n m p) (Maybe (Ram m, Reg), Maybe (Addr n, Reg))
+memory ramValue = do
+  ir <- use memir
+  r <- use regs
+  return $ case ir of
+    Store a m -> (Just (m, r !! a), Nothing)
+    Load a _ -> (Nothing, Just (a, ramValue))
+    _ -> (Nothing, Nothing)
 
 prog :: Vec 8 (Instr 8 8)
 prog =  Nop
