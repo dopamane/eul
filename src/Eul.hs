@@ -2,7 +2,7 @@ module Eul where
 
 import Clash.Prelude
 
-import Control.Lens ( makeLenses, use, (.=), (%=) )
+import Control.Lens ( makeLenses, use, (^.), (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust )
 import Data.Bool ( bool )
@@ -15,22 +15,26 @@ type Reg       = BitVector 32
 type RegBank n = Vec n Reg
 type Imm       = BitVector 16
 type PC p      = Unsigned p
+type Ram m     = Unsigned m
 
-data Instr n
-  = Add (Addr n) (Addr n) (Addr n)
-  | Sub (Addr n) (Addr n) (Addr n)
-  | Mul (Addr n) (Addr n) (Addr n)
-  | PutH (Addr n) Imm
-  | PutL (Addr n) Imm
-  | Bne (Addr n) (Addr n) (Addr n)
-  | Mov (Addr n) (Addr n)
-  | Get (Addr n)
+data Instr n m
+  = Add   (Addr n) (Addr n) (Addr n)
+  | Sub   (Addr n) (Addr n) (Addr n)
+  | Mul   (Addr n) (Addr n) (Addr n)
+  | PutH  (Addr n) Imm
+  | PutL  (Addr n) Imm
+  | Bne   (Addr n) (Addr n) (Addr n)
+  | Mov   (Addr n) (Addr n)
+  | Get   (Addr n)
+  | Load  (Addr n) (Ram m)
+  | Store (Addr n) (Ram m)
   | Nop
 
-data Eul n p = Eul
-  { _exir :: Instr n
-  , _regs :: RegBank n
-  , _pc   :: PC p
+data Eul n m p = Eul
+  { _exir  :: Instr n m
+  , _memir :: Instr n m
+  , _regs  :: RegBank n
+  , _pc    :: PC p
   }
 makeLenses ''Eul
 
@@ -48,35 +52,49 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul fib)
+topEntity clk = withClockReset clk rst (eul prog)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
 
 eul
   :: HiddenClockReset dom gated sync
-  => (KnownNat n, KnownNat p)
-  => Vec (2^p) (Instr n)
+  => (KnownNat n, KnownNat m, KnownNat p)
+  => Vec (2^p) (Instr n m)
   -> Signal dom Bit
   -> Signal dom Bool
   -> Signal dom Bit
 eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
-    (txLd, romAddr) = mooreB eulT eulO initial (ack, romValue)
-    initial = Eul Nop (repeat 0) 0
+    (txLd, romAddr, rdAddr, wrM) = mooreB eulT eulO initial (ack, romValue, ramValue)
+    initial = Eul Nop Nop (repeat 0) 0
     romValue = romPow2 romContent romAddr
+    ramValue = readNew (blockRamPow2 (repeat 0)) rdAddr wrM
 
-eulO :: KnownNat n => Eul n p -> (Maybe Reg, PC p)
-eulO s@Eul{_exir=(Get i), _regs=r} = (Just $ r !! i, _pc s)
-eulO s = (Nothing, _pc s)
+eulO
+  :: (KnownNat n, KnownNat m)
+  => Eul n m p
+  -> (Maybe Reg, PC p, Ram m, Maybe (Ram m, Reg))
+eulO s = (txLd, s^.pc, rdAddr, wrM)
+  where
+    txLd = case s^.exir of
+      Get i -> Just $ (s^.regs) !! i
+      _ -> Nothing
+    rdAddr = case s^.exir of
+      Load _ m -> m
+      _ -> 0
+    wrM = case s^.memir of
+      Store a m -> Just (m, (s^.regs) !! a)
+      _ -> Nothing
 
-eulT :: (KnownNat n, KnownNat p) => Eul n p -> (Bool, Instr n) -> Eul n p
-eulT s (ack, romValue) = flip execState s $ do
-  (branch, stall) <- execute ack
+eulT :: (KnownNat n, KnownNat p) => Eul n m p -> (Bool, Instr n m, Reg) -> Eul n m p
+eulT s (ack, romValue, ramValue) = flip execState s $ do
+  ldReg <- memory ramValue
+  (branch, stall) <- execute ack ldReg
   fetch stall branch romValue
 
-fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n -> State (Eul n p) ()
+fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n m -> State (Eul n m p) ()
 fetch stall branch romValue = unless stall $ do
   pc %= updatePC branch
   exir .= bool romValue Nop (isJust branch)
@@ -88,10 +106,14 @@ fetch stall branch romValue = unless stall $ do
 execute
    :: (KnownNat n, KnownNat p)
    => Bool
-   -> State (Eul n p) (Maybe (PC p), Bool)
-execute ack = do
+   -> Maybe (Addr n, Reg)
+   -> State (Eul n m p) (Maybe (PC p), Bool)
+execute ack ldReg = do
   r <- use regs
   instr <- use exir
+  regs %= case ldReg of
+    Just (a, i) -> replace a i
+    _ -> id
   regs %= case instr of
     Add  a b c -> replace c $ (r !! a) + (r !! b)
     Sub  a b c -> replace c $ (r !! a) - (r !! b)
@@ -100,6 +122,7 @@ execute ack = do
     PutL a i   -> replace a $ getHigher (r !! a) ++# i
     Mov a b    -> replace b $ r !! a
     _          -> id
+  memir .= instr
   return $ case instr of
     Bne a b pcRegAddr | (r !! a) /= (r !! b) -> (Just $ unpack $ resize $ r !! pcRegAddr, False)
     Get _ | not ack -> (Nothing, True)
@@ -108,7 +131,14 @@ execute ack = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-prog :: Vec 8 (Instr 8)
+memory :: Reg -> State (Eul n m p) (Maybe (Addr n, Reg))
+memory ramValue = do
+  ir <- use memir
+  return $ case ir of
+    Load a _ -> Just (a, ramValue)
+    _ -> Nothing
+
+prog :: Vec 8 (Instr 8 8)
 prog =  Nop
      :> PutL 0 5
      :> PutL 1 7
@@ -117,7 +147,7 @@ prog =  Nop
      :> Nop
      :> Nil ++ repeat Nop
 
-fib :: Vec 16 (Instr 8)
+fib :: Vec 16 (Instr 8 8)
 fib =  Nop
     :> PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> PutL 1 0  -- prev prev              0 -> r1
@@ -136,7 +166,6 @@ fib =  Nop
     :> Nop
     :> Nil
 
-{-
 ramTest :: Vec 16 (Instr 8 8)
 ramTest =  Nop
         :> PutL 0 5
@@ -148,4 +177,3 @@ ramTest =  Nop
         :> Add 0 1 2
         :> Get 2
         :> Nil ++ repeat Nop
--}
