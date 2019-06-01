@@ -6,6 +6,7 @@ import Control.Lens ( makeLenses, use, (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust )
 import Data.Bool ( bool )
+import Data.Tuple ( swap )
 
 import Rstn ( rstn )
 import Spi  ( spiWorkerTx )
@@ -64,24 +65,28 @@ eul
 eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
-    (txLd, romAddr) = mooreB eulT eulO initial (ack, romValue)
+    (txLd, romAddr) = mealyB eulT initial (ack, romValue)
     initial = Eul Nop Nop (repeat 0) 0
     romValue = romPow2 romContent romAddr
 
-eulO :: KnownNat n => Eul n p -> (Maybe Reg, PC p)
-eulO s@Eul{_wir=(Get i), _regs=r} = (Just $ r !! i, _pc s)
-eulO s = (Nothing, _pc s)
-
-eulT :: (KnownNat n, KnownNat p) => Eul n p -> (Bool, Instr n) -> Eul n p
-eulT s (ack, romValue) = flip execState s $ do
-  stall <- write ack
+eulT
+  :: (KnownNat n, KnownNat p)
+  => Eul n p
+  -> (Bool, Instr n)
+  -> (Eul n p, (Maybe Reg, PC p))
+eulT s (ack, romValue) = swap $ flip runState s $ do
+  (txLd, stall) <- write ack
   branch <- execute stall
-  fetch stall branch romValue
+  nextPC <- fetch stall branch romValue
+  return (txLd, nextPC)
 
-fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n -> State (Eul n p) ()
-fetch stall branch romValue = unless stall $ do
-  pc %= updatePC branch
-  exir .= bool romValue Nop (isJust branch)
+fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n -> State (Eul n p) (PC p)
+fetch stall branch romValue = do
+  nextPC <- use pc
+  unless stall $ do
+    pc .= updatePC branch nextPC
+    exir .= bool romValue Nop (isJust branch)
+  return nextPC
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
@@ -108,12 +113,13 @@ execute stall = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-write :: Bool -> State (Eul n p) Bool
+write :: KnownNat n => Bool -> State (Eul n p) (Maybe Reg, Bool)
 write ack = do
   instr <- use wir
+  r <- use regs
   return $ case instr of
-    Get _ | not ack -> True
-    _ -> False
+    Get a | not ack -> (Just $ r !! a, True)
+    _ -> (Nothing, False)
 
 prog :: Vec 8 (Instr 8)
 prog =  Nop
