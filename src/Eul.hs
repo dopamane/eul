@@ -5,31 +5,33 @@ import Clash.Prelude
 import Control.Lens ( makeLenses, use, (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust )
+import Data.Bool ( bool )
 
 import Rstn ( rstn )
 import Spi  ( spiWorkerTx )
 
-type Addr    = Index 8
-type Reg     = BitVector 32
-type RegBank = Vec 8 Reg
-type Imm     = BitVector 16
+type Addr n    = Index n
+type Reg       = BitVector 32
+type RegBank n = Vec n Reg
+type Imm       = BitVector 16
+type PC p      = Unsigned p
 
-data Instr
-  = Add Addr Addr Addr
-  | Sub Addr Addr Addr
-  | Mul Addr Addr Addr
-  | PutH Addr Imm
-  | PutL Addr Imm
-  | Bne Addr Addr Addr
-  | Mov Addr Addr
-  | Get Addr
+data Instr n
+  = Add (Addr n) (Addr n) (Addr n)
+  | Sub (Addr n) (Addr n) (Addr n)
+  | Mul (Addr n) (Addr n) (Addr n)
+  | PutH (Addr n) Imm
+  | PutL (Addr n) Imm
+  | Bne (Addr n) (Addr n) (Addr n)
+  | Mov (Addr n) (Addr n)
+  | Get (Addr n)
   | Nop
 
-data Eul n = Eul
-  { _exir :: Instr
-  , _wir  :: Instr
-  , _regs :: RegBank
-  , _pc   :: Unsigned n
+data Eul n p = Eul
+  { _exir :: Instr n
+  , _wir  :: Instr n
+  , _regs :: RegBank n
+  , _pc   :: PC p
   }
 makeLenses ''Eul
 
@@ -54,8 +56,8 @@ topEntity clk = withClockReset clk rst (eul fib)
 
 eul
   :: HiddenClockReset dom gated sync
-  => KnownNat n
-  => Vec (2^n) Instr
+  => (KnownNat n, KnownNat p)
+  => Vec (2^p) (Instr n)
   -> Signal dom Bit
   -> Signal dom Bool
   -> Signal dom Bit
@@ -66,28 +68,26 @@ eul romContent sck ss = miso
     initial = Eul Nop Nop (repeat 0) 0
     romValue = romPow2 romContent romAddr
 
-eulO :: Eul n -> (Maybe (BitVector 32), Unsigned n)
+eulO :: KnownNat n => Eul n p -> (Maybe Reg, PC p)
 eulO s@Eul{_wir=(Get i), _regs=r} = (Just $ r !! i, _pc s)
 eulO s = (Nothing, _pc s)
 
-eulT :: KnownNat n => Eul n -> (Bool, Instr) -> Eul n
+eulT :: (KnownNat n, KnownNat p) => Eul n p -> (Bool, Instr n) -> Eul n p
 eulT s (ack, romValue) = flip execState s $ do
   stall <- write ack
   branch <- execute stall
   fetch stall branch romValue
 
-fetch :: KnownNat n => Bool -> Maybe (Unsigned n) -> Instr -> State (Eul n) ()
+fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n -> State (Eul n p) ()
 fetch stall branch romValue = unless stall $ do
   pc %= updatePC branch
-  exir .= if isJust branch
-    then Nop
-    else romValue
+  exir .= bool romValue Nop (isJust branch)
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
     updatePC (Just b) _  = b
 
-execute :: KnownNat n => Bool -> State (Eul n) (Maybe (Unsigned n))
+execute :: (KnownNat n, KnownNat p) => Bool -> State (Eul n p) (Maybe (PC p))
 execute stall = do
   r <- use regs
   instr <- use exir
@@ -108,14 +108,14 @@ execute stall = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-write :: Bool -> State (Eul n) Bool
+write :: Bool -> State (Eul n p) Bool
 write ack = do
   instr <- use wir
   return $ case instr of
     Get _ | not ack -> True
     _ -> False
 
-prog :: Vec 8 Instr
+prog :: Vec 8 (Instr 8)
 prog =  Nop
      :> PutL 0 5
      :> PutL 1 7
@@ -124,7 +124,7 @@ prog =  Nop
      :> Nop
      :> Nil ++ repeat Nop
 
-fib :: Vec 16 Instr
+fib :: Vec 16 (Instr 8)
 fib =  Nop
     :> PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> PutL 1 0  -- prev prev              0 -> r1
