@@ -52,7 +52,7 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul ramTest)
+topEntity clk = withClockReset clk rst (eul ramReadNew)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
@@ -113,7 +113,7 @@ execute ack ldReg = do
   regs %= case ldReg of
     Just (a, i) -> replace a i
     _ -> id
-  r <- use regs    
+  r <- use regs
   regs %= case instr of
     Add  a b c -> replace c $ (r !! a) + (r !! b)
     Sub  a b c -> replace c $ (r !! a) - (r !! b)
@@ -177,3 +177,14 @@ ramTest =  Nop
         :> Add 0 1 2
         :> Get 2
         :> Nil ++ repeat Nop
+
+ramReadNew :: Vec 8 (Instr 8 8)
+ramReadNew =  Nop
+           :> PutL 0 5
+           :> PutL 1 3
+           :> Add 0 1 2
+           :> Store 2 0
+           :> Load 0 0
+           :> Get 0
+           :> Nop
+           :> Nil
