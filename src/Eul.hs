@@ -52,7 +52,7 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul prog)
+topEntity clk = withClockReset clk rst (eul ramTest)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
