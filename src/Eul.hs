@@ -6,7 +6,6 @@ import Control.Lens ( makeLenses, use, (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust )
 import Data.Bool ( bool )
-import Data.Tuple ( swap )
 
 import Rstn ( rstn )
 import Spi  ( spiWorkerTx )
@@ -30,7 +29,6 @@ data Instr n
 
 data Eul n p = Eul
   { _exir :: Instr n
-  , _wir  :: Instr n
   , _regs :: RegBank n
   , _pc   :: PC p
   }
@@ -65,61 +63,50 @@ eul
 eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
-    (txLd, romAddr) = mealyB eulT initial (ack, romValue)
-    initial = Eul Nop Nop (repeat 0) 0
+    (txLd, romAddr) = mooreB eulT eulO initial (ack, romValue)
+    initial = Eul Nop (repeat 0) 0
     romValue = romPow2 romContent romAddr
 
-eulT
-  :: (KnownNat n, KnownNat p)
-  => Eul n p
-  -> (Bool, Instr n)
-  -> (Eul n p, (Maybe Reg, PC p))
-eulT s (ack, romValue) = swap $ flip runState s $ do
-  (txLd, stall) <- write ack
-  branch <- execute stall
-  nextPC <- fetch stall branch romValue
-  return (txLd, nextPC)
+eulO :: KnownNat n => Eul n p -> (Maybe Reg, PC p)
+eulO s@Eul{_exir=(Get i), _regs=r} = (Just $ r !! i, _pc s)
+eulO s = (Nothing, _pc s)
 
-fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n -> State (Eul n p) (PC p)
-fetch stall branch romValue = do
-  nextPC <- use pc
-  unless stall $ do
-    pc .= updatePC branch nextPC
-    exir .= bool romValue Nop (isJust branch)
-  return nextPC
+eulT :: (KnownNat n, KnownNat p) => Eul n p -> (Bool, Instr n) -> Eul n p
+eulT s (ack, romValue) = flip execState s $ do
+  (branch, stall) <- execute ack
+  fetch stall branch romValue
+
+fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n -> State (Eul n p) ()
+fetch stall branch romValue = unless stall $ do
+  pc %= updatePC branch
+  exir .= bool romValue Nop (isJust branch)
   where
+    updatePC (Just b) _  = b
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
-    updatePC (Just b) _  = b
 
-execute :: (KnownNat n, KnownNat p) => Bool -> State (Eul n p) (Maybe (PC p))
-execute stall = do
+execute
+   :: (KnownNat n, KnownNat p)
+   => Bool
+   -> State (Eul n p) (Maybe (PC p), Bool)
+execute ack = do
   r <- use regs
   instr <- use exir
-  unless stall $ do
-    wir .= instr
-    regs %= case instr of
-      Add  a b c -> replace c $ (r !! a) + (r !! b)
-      Sub  a b c -> replace c $ (r !! a) - (r !! b)
-      Mul  a b c -> replace c $ (r !! a) * (r !! b)
-      PutH a i   -> replace a $ i ++# getLower (r !! a)
-      PutL a i   -> replace a $ getHigher (r !! a) ++# i
-      Mov a b    -> replace b $ r !! a
-      _          -> id
+  regs %= case instr of
+    Add  a b c -> replace c $ (r !! a) + (r !! b)
+    Sub  a b c -> replace c $ (r !! a) - (r !! b)
+    Mul  a b c -> replace c $ (r !! a) * (r !! b)
+    PutH a i   -> replace a $ i ++# getLower (r !! a)
+    PutL a i   -> replace a $ getHigher (r !! a) ++# i
+    Mov a b    -> replace b $ r !! a
+    _          -> id
   return $ case instr of
-    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
-    _  -> Nothing
+    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> (Just $ unpack $ resize $ r !! pcRegAddr, False)
+    Get _ | not ack -> (Nothing, True)
+    _  -> (Nothing, False)
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
-
-write :: KnownNat n => Bool -> State (Eul n p) (Maybe Reg, Bool)
-write ack = do
-  instr <- use wir
-  r <- use regs
-  return $ case instr of
-    Get a | not ack -> (Just $ r !! a, True)
-    _ -> (Nothing, False)
 
 prog :: Vec 8 (Instr 8)
 prog =  Nop
