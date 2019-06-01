@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Eul where
 
 import Clash.Prelude
@@ -30,11 +31,11 @@ data Instr n m
   | Store  (Addr n) (Ram m)
   | Nop
 
-data Eul n m p = Eul
+data Eul n m = Eul
   { _exir  :: Instr n m
   , _memir :: Instr n m
   , _regs  :: RegBank n
-  , _pc    :: PC p
+  , _pc    :: PC m
   }
 makeLenses ''Eul
 
@@ -52,30 +53,30 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul ramReadNew)
+topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
+    ramContent = map encode ramReadNew ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
   :: HiddenClockReset dom gated sync
-  => (KnownNat n, KnownNat m, KnownNat p)
-  => Vec (2^p) (Instr n m)
+  => Vec (2^16) Reg
   -> Signal dom Bit
   -> Signal dom Bool
   -> Signal dom Bit
-eul romContent sck ss = miso
+eul ramContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
-    (txLd, romAddr, rdAddr, wrM) = mooreB eulT eulO initial (ack, romValue, ramValue)
+    (txLd, pcAddr, rdAddr, wrM) = mooreB eulT eulO initial (ack, pcValue, rdValue)
     initial = Eul Nop Nop (repeat 0) 0
-    romValue = romPow2 romContent romAddr
-    ramValue = readNew (blockRamPow2 (repeat 0)) rdAddr wrM
+    rdValue = readNew (blockRamPow2 ramContent) rdAddr wrM
+    pcValue = readNew (blockRamPow2 ramContent) pcAddr wrM
 
 eulO
   :: (KnownNat n, KnownNat m)
-  => Eul n m p
-  -> (Maybe Reg, PC p, Ram m, Maybe (Ram m, Reg))
+  => Eul n m
+  -> (Maybe Reg, PC m, Ram m, Maybe (Ram m, Reg))
 eulO s = (txLd, s^.pc, rdAddr, wrM)
   where
     txLd = case s^.exir of
@@ -88,26 +89,25 @@ eulO s = (txLd, s^.pc, rdAddr, wrM)
       Store a m -> Just (m, (s^.regs) !! a)
       _ -> Nothing
 
-eulT :: (KnownNat n, KnownNat p) => Eul n m p -> (Bool, Instr n m, Reg) -> Eul n m p
-eulT s (ack, romValue, ramValue) = flip execState s $ do
-  ldReg <- memory ramValue
+eulT :: Eul 8 16 -> (Bool, Reg, Reg) -> Eul 8 16
+eulT s (ack, pcValue, rdValue) = flip execState s $ do
+  ldReg <- memory rdValue
   (branch, stall) <- execute ack ldReg
-  fetch stall branch romValue
+  fetch stall branch $ decode pcValue
 
-fetch :: KnownNat p => Bool -> Maybe (PC p) -> Instr n m -> State (Eul n m p) ()
-fetch stall branch romValue = unless stall $ do
+fetch ::Bool -> Maybe (PC 16) -> Instr 8 16 -> State (Eul 8 16) ()
+fetch stall branch pcValue = unless stall $ do
   pc %= updatePC branch
-  exir .= bool romValue Nop (isJust branch)
+  exir .= bool pcValue Nop (isJust branch)
   where
     updatePC (Just b) _  = b
-    updatePC Nothing curPC | curPC == maxBound = curPC
-                           | otherwise = curPC + 1
+    updatePC Nothing curPC = curPC + 1
 
 execute
-   :: (KnownNat n, KnownNat p)
+   :: (KnownNat n, KnownNat m)
    => Bool
    -> Maybe (Addr n, Reg)
-   -> State (Eul n m p) (Maybe (PC p), Bool)
+   -> State (Eul n m) (Maybe (PC m), Bool)
 execute ack ldReg = do
   instr <- use exir
   regs %= case ldReg of
@@ -131,23 +131,74 @@ execute ack ldReg = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-memory :: Reg -> State (Eul n m p) (Maybe (Addr n, Reg))
+memory :: Reg -> State (Eul n m) (Maybe (Addr n, Reg))
 memory ramValue = do
   ir <- use memir
   return $ case ir of
     Load a _ -> Just (a, ramValue)
     _ -> Nothing
 
-prog :: Vec 8 (Instr 8 8)
+{- OPCODE :: BitVector 4
+Add    => 0
+Sub    => 1
+Mul    => 2
+LoadIH => 3
+LoadIL => 4
+Bne    => 5
+Mov    => 6
+Get    => 7
+Load   => 8
+Store  => 9
+Nop    => 10-15
+-}
+
+--   31    27   24   21   18   15               0
+-- 0b[****][***][***][***][***][****************]
+--  opcode|adr1|adr2|adr3|unuse|immediate OR mem
+
+decode :: Reg -> Instr 8 16
+decode bs = case slice d31 d28 bs of
+  0 -> Add    addr1 addr2 addr3
+  1 -> Sub    addr1 addr2 addr3
+  2 -> Mul    addr1 addr2 addr3
+  3 -> LoadIH addr1 imm
+  4 -> LoadIL addr1 imm
+  5 -> Bne    addr1 addr2 addr3
+  6 -> Mov    addr1 addr2
+  7 -> Get    addr1
+  8 -> Load   addr1 (unpack imm)
+  9 -> Store  addr1 (unpack imm)
+  _ -> Nop
+  where
+    addr1 = unpack $ slice d27 d25 bs
+    addr2 = unpack $ slice d24 d22 bs
+    addr3 = unpack $ slice d21 d19 bs
+    imm   = slice d15 d0 bs
+
+encode :: Instr 8 16 -> Reg
+encode = \case
+  Add    addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Sub    addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Mul    addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  LoadIH addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  LoadIL addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  Bne    addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Mov    addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 22)
+  Get    addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 25)
+  Load   addr1 imm         -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 9) ++# pack imm
+  Store  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 9) ++# pack imm
+  Nop                      -> 0b1111 ++# (0 :: BitVector 28)
+
+prog :: Vec 10 (Instr 8 16)
 prog =  Nop
      :> LoadIL 0 5
      :> LoadIL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nop
-     :> Nil ++ repeat Nop
+     :> Nil ++ jmpBegin
 
-fib :: Vec 16 (Instr 8 8)
+fib :: Vec 18 (Instr 8 16)
 fib =  Nop
     :> LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> LoadIL 1 0  -- prev prev              0 -> r1
@@ -162,29 +213,33 @@ fib =  Nop
     :> Mov 7 3   --                       r7 -> r3
     :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
-    :> Nop       -- END
-    :> Nop
-    :> Nil
+    :> Nil ++ jmpBegin
 
-ramTest :: Vec 16 (Instr 8 8)
+ramTest :: Vec 13 (Instr 8 16)
 ramTest =  Nop
         :> LoadIL 0 5
-        :> Store 0 0
+        :> Store 0 200
         :> LoadIL 0 4
-        :> Store 0 1
-        :> Load 0 0
-        :> Load 1 1
+        :> Store 0 201
+        :> Load 0 200
+        :> Load 1 201
         :> Add 0 1 2
         :> Get 2
-        :> Nil ++ repeat Nop
+        :> Nil ++ jmpBegin
 
-ramReadNew :: Vec 8 (Instr 8 8)
+ramReadNew :: Vec 11 (Instr 8 16)
 ramReadNew =  Nop
            :> LoadIL 0 5
            :> LoadIL 1 3
            :> Add 0 1 2
-           :> Store 2 0
-           :> Load 0 0
+           :> Store 2 200
+           :> Load 0 200
            :> Get 0
-           :> Nop
-           :> Nil
+           :> Nil ++ jmpBegin
+
+jmpBegin :: Vec 4 (Instr 8 16)
+jmpBegin =  LoadIL 0 0
+         :> LoadIL 1 1
+         :> LoadIL 2 0
+         :> Bne 0 1 2 -- Loop Back to Beginning
+         :> Nil
