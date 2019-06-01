@@ -5,37 +5,31 @@ import Clash.Prelude
 import Control.Lens ( makeLenses, use, (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust )
-import Data.Tuple ( swap )
-import Data.Bool ( bool )
 
 import Rstn ( rstn )
 import Spi  ( spiWorkerTx )
 
-type Addr n    = Index n
-type Reg       = BitVector 32
-type RegBank n = Vec n Reg
-type Imm       = BitVector 16
-type Ram n     = Unsigned n
-type Rom n     = Unsigned n
+type Addr    = Index 8
+type Reg     = BitVector 32
+type RegBank = Vec 8 Reg
+type Imm     = BitVector 16
 
-data Instr n m
-  = Add   (Addr n) (Addr n) (Addr n)
-  | Sub   (Addr n) (Addr n) (Addr n)
-  | Mul   (Addr n) (Addr n) (Addr n)
-  | PutH  (Addr n) Imm
-  | PutL  (Addr n) Imm
-  | Bne   (Addr n) (Addr n) (Addr n)
-  | Mov   (Addr n) (Addr n)
-  | Load  (Addr n) (Ram m)
-  | Store (Addr n) (Ram m)
-  | Get   (Addr n)
+data Instr
+  = Add Addr Addr Addr
+  | Sub Addr Addr Addr
+  | Mul Addr Addr Addr
+  | PutH Addr Imm
+  | PutL Addr Imm
+  | Bne Addr Addr Addr
+  | Mov Addr Addr
+  | Get Addr
   | Nop
 
-data Eul n m p = Eul
-  { _exir  :: Instr n m
-  , _memir :: Instr n m
-  , _regs  :: RegBank n
-  , _pc    :: Unsigned p
+data Eul n = Eul
+  { _exir :: Instr
+  , _wir  :: Instr
+  , _regs :: RegBank
+  , _pc   :: Unsigned n
   }
 makeLenses ''Eul
 
@@ -53,107 +47,84 @@ topEntity
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
   -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul prog)
+topEntity clk = withClockReset clk rst (eul fib)
   where
     rst = rstn d16 clk
 {-# NOINLINE topEntity #-}
 
 eul
   :: HiddenClockReset dom gated sync
-  => KnownNat p
-  => Vec (2^p) (Instr 8 8)
+  => KnownNat n
+  => Vec (2^n) Instr
   -> Signal dom Bit
   -> Signal dom Bool
   -> Signal dom Bit
 eul romContent sck ss = miso
   where
     (miso, ack) = spiWorkerTx txLd sck ss
-    (txLd, romAddr, rdAddr, wrM) = mealyB eulT initial (ack, romValue, memValue)
-    initial = Eul Nop Nop (replicate d8 0) 0
+    (txLd, romAddr) = mooreB eulT eulO initial (ack, romValue)
+    initial = Eul Nop Nop (repeat 0) 0
     romValue = romPow2 romContent romAddr
-    memValue = readNew (blockRamPow2 (replicate d256 0)) rdAddr wrM
 
-eulT
-  :: (KnownNat n, KnownNat m, KnownNat p)
-  => Eul n m p
-  -> (Bool, Instr n m, Reg)
-  -> (Eul n m p, (Maybe Reg, Rom p, Ram m, Maybe (Ram m, Reg)))
-eulT s (ack, romValue, ramValue) = swap $ flip runState s $ do
-  (wrM, ldReg) <- memory ramValue
-  (stall, spiTx, branch, rdAddr) <- execute ack ldReg
-  nextPC <- fetch stall branch romValue
-  return (spiTx, nextPC, rdAddr, wrM)
+eulO :: Eul n -> (Maybe (BitVector 32), Unsigned n)
+eulO s@Eul{_wir=(Get i), _regs=r} = (Just $ r !! i, _pc s)
+eulO s = (Nothing, _pc s)
 
-fetch
-  :: (KnownNat m, KnownNat p)
-  => Bool
-  -> Maybe (Rom p)
-  -> Instr n m
-  -> State (Eul n m p) (Rom p)
-fetch stall branch romValue = do
-  curPC <- use pc
-  unless stall $ do
-    pc %= updatePC branch
-    exir .= bool romValue Nop (isJust branch)
-  return curPC
+eulT :: KnownNat n => Eul n -> (Bool, Instr) -> Eul n
+eulT s (ack, romValue) = flip execState s $ do
+  stall <- write ack
+  branch <- execute stall
+  fetch stall branch romValue
+
+fetch :: KnownNat n => Bool -> Maybe (Unsigned n) -> Instr -> State (Eul n) ()
+fetch stall branch romValue = unless stall $ do
+  pc %= updatePC branch
+  exir .= if isJust branch
+    then Nop
+    else romValue
   where
     updatePC Nothing curPC | curPC == maxBound = curPC
                            | otherwise = curPC + 1
     updatePC (Just b) _  = b
 
-execute
-  :: (KnownNat n, KnownNat m, KnownNat p)
-  => Bool
-  -> Maybe (Addr n, Reg)
-  -> State (Eul n m p) (Bool, Maybe Reg, Maybe (Rom p), Ram m)
-execute ack ldReg = do
+execute :: KnownNat n => Bool -> State (Eul n) (Maybe (Unsigned n))
+execute stall = do
   r <- use regs
   instr <- use exir
-  regs %= case ldReg of
-    Just (a, i) -> replace a i
-    Nothing     -> id
-  regs %= case instr of
-    Add  a b c -> replace c $ (r !! a) + (r !! b)
-    Sub  a b c -> replace c $ (r !! a) - (r !! b)
-    Mul  a b c -> replace c $ (r !! a) * (r !! b)
-    PutH a i   -> replace a $ i ++# getLower (r !! a)
-    PutL a i   -> replace a $ getHigher (r !! a) ++# i
-    Mov  a b   -> replace b $ r !! a
-    _          -> id
-  memir .= instr
+  unless stall $ do
+    wir .= instr
+    regs %= case instr of
+      Add  a b c -> replace c $ (r !! a) + (r !! b)
+      Sub  a b c -> replace c $ (r !! a) - (r !! b)
+      Mul  a b c -> replace c $ (r !! a) * (r !! b)
+      PutH a i   -> replace a $ i ++# getLower (r !! a)
+      PutL a i   -> replace a $ getHigher (r !! a) ++# i
+      Mov a b    -> replace b $ r !! a
+      _          -> id
   return $ case instr of
-    Bne a b pc' | (r !! a) /= (r !! b) -> (False, Nothing, Just $ unpack $ resize $ r !! pc', 0)
-    Load _ m -> (False, Nothing, Nothing, m)
-    Get a | not ack -> (True, Just $ r !! a, Nothing, 0)
-    _ -> (False, Nothing, Nothing, 0)
+    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> Just $ unpack $ resize $ r !! pcRegAddr
+    _  -> Nothing
   where
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-memory
-  :: KnownNat n
-  => Reg
-  -> State (Eul n m p) (Maybe (Ram m, Reg), Maybe (Addr n, Reg))
-memory ramValue = do
-  ir <- use memir
-  r <- use regs
-  return $ case ir of
-    Store a m -> (Just (m, r !! a), Nothing)
-    Load a _ -> (Nothing, Just (a, ramValue))
-    _ -> (Nothing, Nothing)
+write :: Bool -> State (Eul n) Bool
+write ack = do
+  instr <- use wir
+  return $ case instr of
+    Get _ | not ack -> True
+    _ -> False
 
-prog :: Vec 8 (Instr 8 8)
+prog :: Vec 8 Instr
 prog =  Nop
      :> PutL 0 5
      :> PutL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nop
-     :> Nop
-     :> Nop
-     :> Nil
+     :> Nil ++ repeat Nop
 
-fib :: Vec 16 (Instr 8 8)
+fib :: Vec 16 Instr
 fib =  Nop
     :> PutL 0 29 -- nth  fibonacci number 10 -> r0
     :> PutL 1 0  -- prev prev              0 -> r1
@@ -172,6 +143,7 @@ fib =  Nop
     :> Nop
     :> Nil
 
+{-
 ramTest :: Vec 16 (Instr 8 8)
 ramTest =  Nop
         :> PutL 0 5
@@ -183,3 +155,4 @@ ramTest =  Nop
         :> Add 0 1 2
         :> Get 2
         :> Nil ++ repeat Nop
+-}
