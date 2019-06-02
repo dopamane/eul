@@ -219,7 +219,6 @@ fib =  Nop
     :> Mov 7 3   --                       r7 -> r3
     :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
-    :> Nop
     :> Nil
 
 ramTest :: Vec 13 (Instr 8 10)
