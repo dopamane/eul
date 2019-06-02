@@ -5,7 +5,7 @@ import Clash.Prelude
 
 import Control.Lens ( makeLenses, use, (^.), (.=), (%=) )
 import Control.Monad.State
-import Data.Maybe ( isJust, isNothing )
+import Data.Maybe ( isJust, isNothing, fromMaybe )
 import Data.Bool ( bool )
 
 import Rstn ( rstn )
@@ -13,7 +13,6 @@ import Spi  ( spiWorker )
 
 type Addr n    = Index n
 type Reg       = BitVector 32
-type RegBank n = Vec n Reg
 type Imm       = BitVector 16
 type PC p      = Unsigned p
 type Ram m     = Unsigned m
@@ -33,10 +32,10 @@ data Instr n m
   | Nop
 
 data Eul n m = Eul
-  { _exir  :: Instr n m
-  , _memir :: Instr n m
-  , _regs  :: RegBank n
-  , _pc    :: PC m
+  { _exir     :: Instr n m
+  , _memir    :: Instr n m
+  , _regWrite :: Reg
+  , _pc       :: PC m
   }
 makeLenses ''Eul
 
@@ -59,7 +58,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode putTest ++ repeat 0
+    ramContent = map encode prog ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
@@ -72,31 +71,76 @@ eul
 eul ramContent sck ss mosi = miso
   where
     (miso, ack, spiRx) = spiWorker txLd sck ss mosi
-    (txLd, pcAddr, rdAddr, wrM) = mooreB eulT eulO initial (ack, pcValue, rdValue, spiRx)
-    initial = Eul Nop Nop (repeat 0) 0
+    (txLd, pcAddr, rdAddr, wrM, regAddr1, regAddr2, regAddr3, regWrM) = mealyB eulT initial (ack, pcValue, rdValue, spiRx, regRds)
+    initial = Eul Nop Nop 0 0
     rdValue = readNew (blockRamPow2 ramContent) rdAddr wrM
     pcValue = readNew (blockRamPow2 ramContent) pcAddr wrM
+    regRds = regBank regAddr1 regAddr2 regAddr3 regWrM
+
+eulT
+  :: Eul 8 10
+  -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
+  -> (Eul 8 10, (Maybe Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 8, Addr 8, Addr 8, Maybe (Addr 8, Reg)))
+eulT s i@(_, _, ramValue, _, (r1, _, _)) = (s', o)
+  where
+    s' = eulS s i
+    o = eulO s ramValue r1
 
 eulO
   :: (KnownNat n, KnownNat m)
   => Eul n m
-  -> (Maybe Reg, PC m, Ram m, Maybe (Ram m, Reg))
-eulO s = (txLd, s^.pc, rdAddr, wrM)
+  -> Reg
+  -> Reg
+  -> (Maybe Reg, PC m, Ram m, Maybe (Ram m, Reg), Addr n, Addr n, Addr n, Maybe (Addr n, Reg))
+eulO s ramValue r1 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3, regWrM)
   where
     txLd = case s^.exir of
-      Get i -> Just $ (s^.regs) !! i
+      Get _ -> Just r1
       _ -> Nothing
     rdAddr = case s^.exir of
       Load _ m -> m
       _ -> 0
     wrM = case s^.memir of
-      Store a m -> Just (m, (s^.regs) !! a)
+      Store _ m -> Just (m, s^.regWrite)
       _ -> Nothing
+    regAddr1 = case s^.exir of
+      Add   a _ _ -> a
+      Sub   a _ _ -> a
+      Mul   a _ _ -> a
+      ImmH  a _   -> a
+      ImmL  a _   -> a
+      Bne   a _ _ -> a
+      Mov   a _   -> a
+      Get   a     -> a
+      Store a _   -> a
+      _           -> 0
+    regAddr2 = case s^.exir of
+      Add _ b _ -> b
+      Sub _ b _ -> b
+      Mul _ b _ -> b
+      Bne _ b _ -> b
+      _         -> 0
+    regAddr3 = case s^.exir of
+      Bne _ _ c -> c
+      _         -> 0
+    regWrM = case s^.memir of
+      Add _ _ c -> Just (c, s^.regWrite)
+      Sub _ _ c -> Just (c, s^.regWrite)
+      Mul _ _ c -> Just (c, s^.regWrite)
+      ImmH a _  -> Just (a, s^.regWrite)
+      ImmL a _  -> Just (a, s^.regWrite)
+      Mov _ b   -> Just (b, s^.regWrite)
+      Put a     -> Just (a, s^.regWrite)
+      Load a _  -> Just (a, ramValue)
+      _         -> Nothing
 
-eulT :: Eul 8 10 -> (Bool, Reg, Reg, Maybe Reg) -> Eul 8 10
-eulT s (ack, pcValue, rdValue, spiRx) = flip execState s $ do
-  (memBranch, ldReg) <- memory rdValue
-  (exBranch, stall) <- execute ack ldReg spiRx
+eulS
+  :: Eul 8 10
+  -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
+  -> Eul 8 10
+eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
+  memBranch <- memory
+  (exBranch, stall) <- execute ack regRds spiRx
   fetch stall exBranch memBranch $ decode pcValue
 
 fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 8 10 -> State (Eul 8 10) ()
@@ -112,29 +156,24 @@ fetch stall exBranch memBranch pcValue = unless stall $ do
 execute
    :: (KnownNat n, KnownNat m)
    => Bool
-   -> Maybe (Addr n, Reg)
+   -> (Reg, Reg, Reg)
    -> Maybe Reg
    -> State (Eul n m) (Maybe (PC m), Bool)
-execute ack ldReg spiRx = do
+execute ack (r1, r2, r3) spiRx = do
   instr <- use exir
-  regs %= case ldReg of
-    Just (a, i) -> replace a i
-    _ -> id
-  r <- use regs
-  regs %= case instr of
-    Add  a b c -> replace c $ (r !! a) + (r !! b)
-    Sub  a b c -> replace c $ (r !! a) - (r !! b)
-    Mul  a b c -> replace c $ (r !! a) * (r !! b)
-    ImmH a i   -> replace a $ i ++# getLower (r !! a)
-    ImmL a i   -> replace a $ getHigher (r !! a) ++# i
-    Mov  a b   -> replace b $ r !! a
-    Put  a     -> case spiRx of
-      Just rx -> replace a rx
-      Nothing -> id
-    _  -> id
+  regWrite .= case instr of
+    Add{} -> r1 + r2
+    Sub{} -> r1 - r2
+    Mul{} -> r1 * r2
+    ImmH _ i -> i ++# getLower r1
+    ImmL _ i -> getHigher r1 ++# i
+    Mov{} -> r1
+    Put _ -> fromMaybe 0 spiRx
+    Store{} -> r1
+    _ -> 0
   memir .= instr
   return $ case instr of
-    Bne a b pcRegAddr | (r !! a) /= (r !! b) -> (Just $ unpack $ resize $ r !! pcRegAddr, False)
+    Bne{} | r1 /= r2 -> (Just $ unpack $ resize r3, False)
     Get _ | not ack -> (Nothing, True)
     Put _ | isNothing spiRx -> (Nothing, True)
     _  -> (Nothing, False)
@@ -142,13 +181,29 @@ execute ack ldReg spiRx = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-memory :: Reg -> State (Eul n m) (Bool, Maybe (Addr n, Reg))
-memory ramValue = do
+memory :: State (Eul n m) Bool
+memory = do
   ir <- use memir
   return $ case ir of
-    Load a _ -> (False, Just (a, ramValue))
-    Bne{} -> (True, Nothing)
-    _ -> (False, Nothing)
+    Bne{} -> True
+    _ -> False
+
+regBank
+  :: HiddenClockReset dom gated sync
+  => (KnownNat n, 1 <= n)
+  => Signal dom (Addr n)
+  -> Signal dom (Addr n)
+  -> Signal dom (Addr n)
+  -> Signal dom (Maybe (Addr n, Reg))
+  -> Signal dom (Reg, Reg, Reg)
+regBank regAddr1 regAddr2 regAddr3 regWrM = bundle (regRd1, regRd2, regRd3)
+  where
+    regRd1 = readNew asyncRamPow2 (repack <$> regAddr1) (fmap wrMap <$> regWrM)
+    regRd2 = readNew asyncRamPow2 (repack <$> regAddr2) (fmap wrMap <$> regWrM)
+    regRd3 = readNew asyncRamPow2 (repack <$> regAddr3) (fmap wrMap <$> regWrM)
+    repack = unpack . pack
+    wrMap (a,v) = (repack a, v)
+
 
 {- OPCODE :: BitVector 4
 Add   => 0
