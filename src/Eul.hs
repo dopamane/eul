@@ -11,7 +11,7 @@ import Data.Bool ( bool )
 import Rstn ( rstn )
 import Spi  ( spiWorker )
 
-type Addr n    = Index n
+type Addr n    = Unsigned n
 type Reg       = BitVector 32
 type Imm       = BitVector 16
 type PC p      = Unsigned p
@@ -78,9 +78,9 @@ eul ramContent sck ss mosi = miso
     regRds = regBank regAddr1 regAddr2 regAddr3 regWrM
 
 eulT
-  :: Eul 8 10
+  :: Eul 3 10
   -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
-  -> (Eul 8 10, (Maybe Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 8, Addr 8, Addr 8, Maybe (Addr 8, Reg)))
+  -> (Eul 3 10, (Maybe Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 3, Addr 3, Addr 3, Maybe (Addr 3, Reg)))
 eulT s i@(_, _, ramValue, _, (r1, _, _)) = (s', o)
   where
     s' = eulS s i
@@ -135,15 +135,15 @@ eulO s ramValue r1 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3, re
       _         -> Nothing
 
 eulS
-  :: Eul 8 10
+  :: Eul 3 10
   -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
-  -> Eul 8 10
+  -> Eul 3 10
 eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
   memBranch <- memory
   (exBranch, stall) <- execute ack regRds spiRx
   fetch stall exBranch memBranch $ decode pcValue
 
-fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 8 10 -> State (Eul 8 10) ()
+fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 3 10 -> State (Eul 3 10) ()
 fetch stall exBranch memBranch pcValue = unless stall $ do
   pc %= updatePC exBranch pcValue
   exir .= bool pcValue Nop (isJust exBranch || memBranch)
@@ -198,12 +198,9 @@ regBank
   -> Signal dom (Reg, Reg, Reg)
 regBank regAddr1 regAddr2 regAddr3 regWrM = bundle (regRd1, regRd2, regRd3)
   where
-    regRd1 = readNew asyncRamPow2 (repack <$> regAddr1) (fmap wrMap <$> regWrM)
-    regRd2 = readNew asyncRamPow2 (repack <$> regAddr2) (fmap wrMap <$> regWrM)
-    regRd3 = readNew asyncRamPow2 (repack <$> regAddr3) (fmap wrMap <$> regWrM)
-    repack = unpack . pack
-    wrMap (a,v) = (repack a, v)
-
+    regRd1 = readNew asyncRamPow2 regAddr1 regWrM
+    regRd2 = readNew asyncRamPow2 regAddr2 regWrM
+    regRd3 = readNew asyncRamPow2 regAddr3 regWrM
 
 {- OPCODE :: BitVector 4
 Add   => 0
@@ -224,28 +221,28 @@ Nop   => 11-15
 -- 0b[****][***][***][***][***][****************]
 --  opcode|adr1|adr2|adr3|unusd|immediate OR mem[9:0]
 
-decode :: Reg -> Instr 8 10
+decode :: Reg -> Instr 3 10
 decode bs = case slice d31 d28 bs of
-  0  -> Add    addr1 addr2 addr3
-  1  -> Sub    addr1 addr2 addr3
-  2  -> Mul    addr1 addr2 addr3
-  3  -> ImmH addr1 imm
-  4  -> ImmL addr1 imm
-  5  -> Bne    addr1 addr2 addr3
-  6  -> Mov    addr1 addr2
-  7  -> Get    addr1
-  8  -> Put    addr1
-  9  -> Load   addr1 (unpack mem)
-  10 -> Store  addr1 (unpack mem)
+  0  -> Add   addr1 addr2 addr3
+  1  -> Sub   addr1 addr2 addr3
+  2  -> Mul   addr1 addr2 addr3
+  3  -> ImmH  addr1 imm
+  4  -> ImmL  addr1 imm
+  5  -> Bne   addr1 addr2 addr3
+  6  -> Mov   addr1 addr2
+  7  -> Get   addr1
+  8  -> Put   addr1
+  9  -> Load  addr1 mem
+  10 -> Store addr1 mem
   _ -> Nop
   where
     addr1 = unpack $ slice d27 d25 bs
     addr2 = unpack $ slice d24 d22 bs
     addr3 = unpack $ slice d21 d19 bs
     imm   = slice d15 d0 bs
-    mem   = slice d9  d0 bs
+    mem   = unpack $ slice d9  d0 bs
 
-encode :: Instr 8 10 -> Reg
+encode :: Instr 3 10 -> Reg
 encode = \case
   Add   addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
   Sub   addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
@@ -260,21 +257,21 @@ encode = \case
   Store addr1 imm         -> 0b1010 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
   Nop                     -> 0b1111 ++# (0 :: BitVector 28)
 
-prog :: Vec 4 (Instr 8 10)
+prog :: Vec 4 (Instr 3 10)
 prog =  ImmL 0 5
      :> ImmL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nil
 
-putTest :: Vec 4 (Instr 8 10)
+putTest :: Vec 4 (Instr 3 10)
 putTest =  ImmL 0 5
         :> Put 1
         :> Add 0 1 2
         :> Get 2
         :> Nil
 
-fib :: Vec 13 (Instr 8 10)
+fib :: Vec 13 (Instr 3 10)
 fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
     :> ImmL 1 0  -- prev prev              0 -> r1
     :> ImmL 2 1  -- prev                   1 -> r2
@@ -290,7 +287,7 @@ fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
     :> Get 2     -- spi write
     :> Nil
 
-ramTest :: Vec 12 (Instr 8 10)
+ramTest :: Vec 12 (Instr 3 10)
 ramTest =  ImmL 0 5
         :> Store 0 200
         :> ImmL 0 4
@@ -301,7 +298,7 @@ ramTest =  ImmL 0 5
         :> Get 2
         :> Nil ++ jmpBegin
 
-ramReadNew :: Vec 10 (Instr 8 10)
+ramReadNew :: Vec 10 (Instr 3 10)
 ramReadNew =  ImmL 0 5
            :> ImmL 1 3
            :> Add 0 1 2
@@ -310,7 +307,7 @@ ramReadNew =  ImmL 0 5
            :> Get 0
            :> Nil ++ jmpBegin
 
-jmpBegin :: Vec 4 (Instr 8 10)
+jmpBegin :: Vec 4 (Instr 3 10)
 jmpBegin =  ImmL 0 0
          :> ImmL 1 1
          :> ImmL 2 0
