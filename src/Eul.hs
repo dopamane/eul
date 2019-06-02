@@ -58,7 +58,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode prog ++ repeat 0
+    ramContent = map encode putTest ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
