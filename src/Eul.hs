@@ -89,13 +89,13 @@ eulO s = (txLd, s^.pc, rdAddr, wrM)
       Store a m -> Just (m, (s^.regs) !! a)
       _ -> Nothing
 
-eulT :: Eul 16 10 -> (Bool, Reg, Reg) -> Eul 16 10
+eulT :: Eul 8 10 -> (Bool, Reg, Reg) -> Eul 8 10
 eulT s (ack, pcValue, rdValue) = flip execState s $ do
   (memBranch, ldReg) <- memory rdValue
   (exBranch, stall) <- execute ack ldReg
   fetch stall exBranch memBranch $ decode pcValue
 
-fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 16 10 -> State (Eul 16 10) ()
+fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 8 10 -> State (Eul 8 10) ()
 fetch stall exBranch memBranch pcValue = unless stall $ do
   pc %= updatePC exBranch
   exir .= bool pcValue Nop (isJust exBranch || memBranch)
@@ -153,11 +153,11 @@ Store  => 9
 Nop    => 10-15
 -}
 
---   31    27    23    19    15               0
--- 0b[****][****][****][****][****************]
---  opcode|addr1|addr2|addr3|immediate OR mem[9:0]
+--   31    27   24   21   18   15               0
+-- 0b[****][***][***][***][***][****************]
+--  opcode|adr1|adr2|adr3|unusd|immediate OR mem[9:0]
 
-decode :: Reg -> Instr 16 10
+decode :: Reg -> Instr 8 10
 decode bs = case slice d31 d28 bs of
   0 -> Add    addr1 addr2 addr3
   1 -> Sub    addr1 addr2 addr3
@@ -171,34 +171,34 @@ decode bs = case slice d31 d28 bs of
   9 -> Store  addr1 (unpack mem)
   _ -> Nop
   where
-    addr1 = unpack $ slice d27 d24 bs
-    addr2 = unpack $ slice d23 d20 bs
-    addr3 = unpack $ slice d19 d16 bs
+    addr1 = unpack $ slice d27 d25 bs
+    addr2 = unpack $ slice d24 d22 bs
+    addr3 = unpack $ slice d21 d19 bs
     imm   = slice d15 d0 bs
     mem   = slice d9  d0 bs
 
-encode :: Instr 16 10 -> Reg
+encode :: Instr 8 10 -> Reg
 encode = \case
-  Add    addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
-  Sub    addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
-  Mul    addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
-  LoadIH addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 8) ++# imm
-  LoadIL addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 8) ++# imm
-  Bne    addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
-  Mov    addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 20)
-  Get    addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 24)
-  Load   addr1 imm         -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 14) ++# pack imm
-  Store  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 14) ++# pack imm
+  Add    addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Sub    addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Mul    addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  LoadIH addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  LoadIL addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  Bne    addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Mov    addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 22)
+  Get    addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 25)
+  Load   addr1 imm         -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
+  Store  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
   Nop                      -> 0b1111 ++# (0 :: BitVector 28)
 
-prog :: Vec 4 (Instr 16 10)
+prog :: Vec 4 (Instr 8 10)
 prog =  LoadIL 0 5
      :> LoadIL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nil
 
-fib :: Vec 13 (Instr 16 10)
+fib :: Vec 13 (Instr 8 10)
 fib =  LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> LoadIL 1 0  -- prev prev              0 -> r1
     :> LoadIL 2 1  -- prev                   1 -> r2
@@ -214,7 +214,7 @@ fib =  LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> Get 2     -- spi write
     :> Nil
 
-ramTest :: Vec 12 (Instr 16 10)
+ramTest :: Vec 12 (Instr 8 10)
 ramTest =  LoadIL 0 5
         :> Store 0 200
         :> LoadIL 0 4
@@ -225,7 +225,7 @@ ramTest =  LoadIL 0 5
         :> Get 2
         :> Nil ++ jmpBegin
 
-ramReadNew :: Vec 10 (Instr 16 10)
+ramReadNew :: Vec 10 (Instr 8 10)
 ramReadNew =  LoadIL 0 5
            :> LoadIL 1 3
            :> Add 0 1 2
@@ -234,7 +234,7 @@ ramReadNew =  LoadIL 0 5
            :> Get 0
            :> Nil ++ jmpBegin
 
-jmpBegin :: Vec 4 (Instr 16 10)
+jmpBegin :: Vec 4 (Instr 8 10)
 jmpBegin =  LoadIL 0 0
          :> LoadIL 1 1
          :> LoadIL 2 0
