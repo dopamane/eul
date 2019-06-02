@@ -91,19 +91,17 @@ eulO s = (txLd, s^.pc, rdAddr, wrM)
 
 eulT :: Eul 8 10 -> (Bool, Reg, Reg) -> Eul 8 10
 eulT s (ack, pcValue, rdValue) = flip execState s $ do
-  ldReg <- memory rdValue
-  (branch, stall) <- execute ack ldReg
-  fetch stall branch $ decode pcValue
+  (memBranch, ldReg) <- memory rdValue
+  (exBranch, stall) <- execute ack ldReg
+  fetch stall exBranch memBranch $ decode pcValue
 
-fetch ::Bool -> Maybe (PC 10) -> Instr 8 10 -> State (Eul 8 10) ()
-fetch stall branch pcValue = unless stall $ do
-  pc %= updatePC branch pcValue
-  exir .= bool pcValue Nop (isJust branch)
+fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 8 10 -> State (Eul 8 10) ()
+fetch stall exBranch memBranch pcValue = unless stall $ do
+  pc %= updatePC exBranch
+  exir .= bool pcValue Nop (isJust exBranch || memBranch)
   where
-    updatePC (Just b) _ = const b
-    updatePC _ Get{} = id
-    updatePC _ Bne{} = id
-    updatePC _  _ = (+1)
+    updatePC (Just b) = const b
+    updatePC _ = (+1)
 
 execute
    :: (KnownNat n, KnownNat m)
@@ -133,12 +131,13 @@ execute ack ldReg = do
     getHigher = slice d31 d16
     getLower  = slice d15 d0
 
-memory :: Reg -> State (Eul n m) (Maybe (Addr n, Reg))
+memory :: Reg -> State (Eul n m) (Bool, Maybe (Addr n, Reg))
 memory ramValue = do
   ir <- use memir
   return $ case ir of
-    Load a _ -> Just (a, ramValue)
-    _ -> Nothing
+    Load a _ -> (False, Just (a, ramValue))
+    Bne{} -> (True, Nothing)
+    _ -> (False, Nothing)
 
 {- OPCODE :: BitVector 4
 Add    => 0
