@@ -78,9 +78,9 @@ eul ramContent sck ss mosi = miso
     regRds = regBank regAddr1 regAddr2 regAddr3 regWrM
 
 eulT
-  :: Eul 3 10
+  :: Eul 4 10
   -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
-  -> (Eul 3 10, (Maybe Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 3, Addr 3, Addr 3, Maybe (Addr 3, Reg)))
+  -> (Eul 4 10, (Maybe Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 4, Addr 4, Addr 4, Maybe (Addr 4, Reg)))
 eulT s i@(_, _, ramValue, _, (r1, _, _)) = (s', o)
   where
     s' = eulS s i
@@ -133,9 +133,9 @@ eulO s ramValue r1 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3, re
       _         -> Nothing
 
 eulS
-  :: Eul 3 10
+  :: Eul 4 10
   -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
-  -> Eul 3 10
+  -> Eul 4 10
 eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
   memBranch <- uses memir $ \case
     Bne{} -> True
@@ -143,7 +143,7 @@ eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
   (exBranch, stall) <- execute ack regRds spiRx
   fetch stall exBranch memBranch $ decode pcValue
 
-fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 3 10 -> State (Eul 3 10) ()
+fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 4 10 -> State (Eul 4 10) ()
 fetch stall exBranch memBranch pcValue = unless stall $ do
   pc %= updatePC exBranch pcValue
   exir .= bool pcValue Nop (isJust exBranch || memBranch)
@@ -220,11 +220,11 @@ Store => 10
 Nop   => 11-15
 -}
 
---   31    27   24   21   18   15               0
--- 0b[****][***][***][***][***][****************]
---  opcode|adr1|adr2|adr3|unusd|immediate OR mem[9:0]
+--   31    27    23    19    15               0
+-- 0b[****][****][****][****][****************]
+--  opcode|addr1|addr2|addr3|immediate OR mem[9:0]
 
-decode :: Reg -> Instr 3 10
+decode :: Reg -> Instr 4 10
 decode bs = case slice d31 d28 bs of
   0  -> Add   addr1 addr2 addr3
   1  -> Sub   addr1 addr2 addr3
@@ -239,42 +239,42 @@ decode bs = case slice d31 d28 bs of
   10 -> Store addr1 mem
   _ -> Nop
   where
-    addr1 = unpack $ slice d27 d25 bs
-    addr2 = unpack $ slice d24 d22 bs
-    addr3 = unpack $ slice d21 d19 bs
+    addr1 = unpack $ slice d27 d24 bs
+    addr2 = unpack $ slice d23 d20 bs
+    addr3 = unpack $ slice d19 d16 bs
     imm = slice d15 d0 bs
     mem = unpack $ slice d9 d0 bs
 
-encode :: Instr 3 10 -> Reg
+encode :: Instr 4 10 -> Reg
 encode = \case
-  Add   addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  Sub   addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  Mul   addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  ImmH  addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
-  ImmL  addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
-  Bne   addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  Mov   addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 22)
-  Get   addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 25)
-  Put   addr1             -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 25)
-  Load  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
-  Store addr1 imm         -> 0b1010 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
+  Add   addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
+  Sub   addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
+  Mul   addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
+  ImmH  addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 8) ++# imm
+  ImmL  addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 8) ++# imm
+  Bne   addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 16)
+  Mov   addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 20)
+  Get   addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 24)
+  Put   addr1             -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 24)
+  Load  addr1 mem         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 14) ++# pack mem
+  Store addr1 mem         -> 0b1010 ++# pack addr1 ++# (0 :: BitVector 14) ++# pack mem
   Nop                     -> 0b1111 ++# (0 :: BitVector 28)
 
-prog :: Vec 4 (Instr 3 10)
+prog :: Vec 4 (Instr 4 10)
 prog =  ImmL 0 5
      :> ImmL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nil
 
-putTest :: Vec 4 (Instr 3 10)
+putTest :: Vec 4 (Instr 4 10)
 putTest =  ImmL 0 5
         :> Put 1
         :> Add 0 1 2
         :> Get 2
         :> Nil
 
-fib :: Vec 13 (Instr 3 10)
+fib :: Vec 13 (Instr 4 10)
 fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
     :> ImmL 1 0  -- prev prev              0 -> r1
     :> ImmL 2 1  -- prev                   1 -> r2
@@ -290,7 +290,7 @@ fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
     :> Get 2     -- spi write
     :> Nil
 
-ramTest :: Vec 12 (Instr 3 10)
+ramTest :: Vec 12 (Instr 4 10)
 ramTest =  ImmL 0 5
         :> Store 0 200
         :> ImmL 0 4
@@ -301,7 +301,7 @@ ramTest =  ImmL 0 5
         :> Get 2
         :> Nil ++ jmpBegin
 
-ramReadNew :: Vec 10 (Instr 3 10)
+ramReadNew :: Vec 10 (Instr 4 10)
 ramReadNew =  ImmL 0 5
            :> ImmL 1 3
            :> Add 0 1 2
@@ -310,7 +310,7 @@ ramReadNew =  ImmL 0 5
            :> Get 0
            :> Nil ++ jmpBegin
 
-jmpBegin :: Vec 4 (Instr 3 10)
+jmpBegin :: Vec 4 (Instr 4 10)
 jmpBegin =  ImmL 0 0
          :> ImmL 1 1
          :> ImmL 2 0
