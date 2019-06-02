@@ -5,11 +5,11 @@ import Clash.Prelude
 
 import Control.Lens ( makeLenses, use, (^.), (.=), (%=) )
 import Control.Monad.State
-import Data.Maybe ( isJust )
+import Data.Maybe ( isJust, isNothing )
 import Data.Bool ( bool )
 
 import Rstn ( rstn )
-import Spi  ( spiWorkerTx )
+import Spi  ( spiWorker )
 
 type Addr n    = Index n
 type Reg       = BitVector 32
@@ -27,6 +27,7 @@ data Instr n m
   | Bne   (Addr n) (Addr n) (Addr n)
   | Mov   (Addr n) (Addr n)
   | Get   (Addr n)
+  | Put   (Addr n)
   | Load  (Addr n) (Ram m)
   | Store (Addr n) (Ram m)
   | Nop
@@ -45,6 +46,7 @@ makeLenses ''Eul
     , t_inputs = [ PortName "clk"
                  , PortName "SCK"
                  , PortName "SS"
+                 , PortName "MOSI"
                  ]
     , t_output = PortName "MISO"
     })#-}
@@ -52,11 +54,12 @@ topEntity
   :: Clock System 'Source -- clk
   -> Signal System Bit    -- sck
   -> Signal System Bool   -- ss
+  -> Signal System Bit    -- mosi
   -> Signal System Bit    -- miso
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode fib ++ repeat 0
+    ramContent = map encode putTest ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
@@ -65,10 +68,11 @@ eul
   -> Signal dom Bit
   -> Signal dom Bool
   -> Signal dom Bit
-eul ramContent sck ss = miso
+  -> Signal dom Bit
+eul ramContent sck ss mosi = miso
   where
-    (miso, ack) = spiWorkerTx txLd sck ss
-    (txLd, pcAddr, rdAddr, wrM) = mooreB eulT eulO initial (ack, pcValue, rdValue)
+    (miso, ack, spiRx) = spiWorker txLd sck ss mosi
+    (txLd, pcAddr, rdAddr, wrM) = mooreB eulT eulO initial (ack, pcValue, rdValue, spiRx)
     initial = Eul Nop Nop (repeat 0) 0
     rdValue = readNew (blockRamPow2 ramContent) rdAddr wrM
     pcValue = readNew (blockRamPow2 ramContent) pcAddr wrM
@@ -89,10 +93,10 @@ eulO s = (txLd, s^.pc, rdAddr, wrM)
       Store a m -> Just (m, (s^.regs) !! a)
       _ -> Nothing
 
-eulT :: Eul 8 10 -> (Bool, Reg, Reg) -> Eul 8 10
-eulT s (ack, pcValue, rdValue) = flip execState s $ do
+eulT :: Eul 8 10 -> (Bool, Reg, Reg, Maybe Reg) -> Eul 8 10
+eulT s (ack, pcValue, rdValue, spiRx) = flip execState s $ do
   (memBranch, ldReg) <- memory rdValue
-  (exBranch, stall) <- execute ack ldReg
+  (exBranch, stall) <- execute ack ldReg spiRx
   fetch stall exBranch memBranch $ decode pcValue
 
 fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 8 10 -> State (Eul 8 10) ()
@@ -107,25 +111,30 @@ execute
    :: (KnownNat n, KnownNat m)
    => Bool
    -> Maybe (Addr n, Reg)
+   -> Maybe Reg
    -> State (Eul n m) (Maybe (PC m), Bool)
-execute ack ldReg = do
+execute ack ldReg spiRx = do
   instr <- use exir
   regs %= case ldReg of
     Just (a, i) -> replace a i
     _ -> id
   r <- use regs
   regs %= case instr of
-    Add    a b c -> replace c $ (r !! a) + (r !! b)
-    Sub    a b c -> replace c $ (r !! a) - (r !! b)
-    Mul    a b c -> replace c $ (r !! a) * (r !! b)
+    Add  a b c -> replace c $ (r !! a) + (r !! b)
+    Sub  a b c -> replace c $ (r !! a) - (r !! b)
+    Mul  a b c -> replace c $ (r !! a) * (r !! b)
     ImmH a i   -> replace a $ i ++# getLower (r !! a)
     ImmL a i   -> replace a $ getHigher (r !! a) ++# i
-    Mov    a b   -> replace b $ r !! a
+    Mov  a b   -> replace b $ r !! a
+    Put  a     -> case spiRx of
+      Just rx -> replace a rx
+      Nothing -> id
     _  -> id
   memir .= instr
   return $ case instr of
     Bne a b pcRegAddr | (r !! a) /= (r !! b) -> (Just $ unpack $ resize $ r !! pcRegAddr, False)
     Get _ | not ack -> (Nothing, True)
+    Put _ | isNothing spiRx -> (Nothing, True)
     _  -> (Nothing, False)
   where
     getHigher = slice d31 d16
@@ -140,17 +149,18 @@ memory ramValue = do
     _ -> (False, Nothing)
 
 {- OPCODE :: BitVector 4
-Add    => 0
-Sub    => 1
-Mul    => 2
-LoadIH => 3
-LoadIL => 4
-Bne    => 5
-Mov    => 6
-Get    => 7
-Load   => 8
-Store  => 9
-Nop    => 10-15
+Add   => 0
+Sub   => 1
+Mul   => 2
+ImmH  => 3
+ImmL  => 4
+Bne   => 5
+Mov   => 6
+Get   => 7
+Put   => 8
+Load  => 9
+Store => 10
+Nop   => 11-15
 -}
 
 --   31    27   24   21   18   15               0
@@ -159,16 +169,17 @@ Nop    => 10-15
 
 decode :: Reg -> Instr 8 10
 decode bs = case slice d31 d28 bs of
-  0 -> Add    addr1 addr2 addr3
-  1 -> Sub    addr1 addr2 addr3
-  2 -> Mul    addr1 addr2 addr3
-  3 -> ImmH addr1 imm
-  4 -> ImmL addr1 imm
-  5 -> Bne    addr1 addr2 addr3
-  6 -> Mov    addr1 addr2
-  7 -> Get    addr1
-  8 -> Load   addr1 (unpack mem)
-  9 -> Store  addr1 (unpack mem)
+  0  -> Add    addr1 addr2 addr3
+  1  -> Sub    addr1 addr2 addr3
+  2  -> Mul    addr1 addr2 addr3
+  3  -> ImmH addr1 imm
+  4  -> ImmL addr1 imm
+  5  -> Bne    addr1 addr2 addr3
+  6  -> Mov    addr1 addr2
+  7  -> Get    addr1
+  8  -> Put    addr1
+  9  -> Load   addr1 (unpack mem)
+  10 -> Store  addr1 (unpack mem)
   _ -> Nop
   where
     addr1 = unpack $ slice d27 d25 bs
@@ -179,17 +190,18 @@ decode bs = case slice d31 d28 bs of
 
 encode :: Instr 8 10 -> Reg
 encode = \case
-  Add    addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  Sub    addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  Mul    addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  ImmH addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
-  ImmL addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
-  Bne    addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  Mov    addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 22)
-  Get    addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 25)
-  Load   addr1 imm         -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
-  Store  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
-  Nop                      -> 0b1111 ++# (0 :: BitVector 28)
+  Add   addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Sub   addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Mul   addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  ImmH  addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  ImmL  addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  Bne   addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
+  Mov   addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 22)
+  Get   addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 25)
+  Put   addr1             -> 0b1000 ++# pack addr1 ++# (0 :: BitVector 25)
+  Load  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
+  Store addr1 imm         -> 0b1010 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
+  Nop                     -> 0b1111 ++# (0 :: BitVector 28)
 
 prog :: Vec 4 (Instr 8 10)
 prog =  ImmL 0 5
@@ -197,6 +209,13 @@ prog =  ImmL 0 5
      :> Add  0 1 2
      :> Get  2
      :> Nil
+
+putTest :: Vec 4 (Instr 8 10)
+putTest =  ImmL 0 5
+        :> Put 1
+        :> Add 0 1 2
+        :> Get 2
+        :> Nil
 
 fib :: Vec 13 (Instr 8 10)
 fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
