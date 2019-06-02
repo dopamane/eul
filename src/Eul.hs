@@ -97,11 +97,12 @@ eulT s (ack, pcValue, rdValue) = flip execState s $ do
 
 fetch ::Bool -> Maybe (PC 10) -> Instr 8 10 -> State (Eul 8 10) ()
 fetch stall branch pcValue = unless stall $ do
-  pc %= updatePC branch
+  pc %= updatePC branch pcValue
   exir .= bool pcValue Nop (isJust branch)
   where
-    updatePC (Just b) _  = b
-    updatePC Nothing curPC = curPC + 1
+    updatePC (Just b) _ = const b
+    updatePC _ (Get _) = id
+    updatePC _  _ = (+1)
 
 execute
    :: (KnownNat n, KnownNat m)
