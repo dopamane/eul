@@ -200,7 +200,7 @@ prog =  Nop
      :> Nop
      :> Nil ++ jmpBegin
 
-fib :: Vec 16 (Instr 8 10)
+fib :: Vec 15 (Instr 8 10)
 fib =  Nop
     :> LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> LoadIL 1 0  -- prev prev              0 -> r1
@@ -215,7 +215,6 @@ fib =  Nop
     :> Mov 7 3   --                       r7 -> r3
     :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
-    :> Nop
     :> Nop
     :> Nil
 
