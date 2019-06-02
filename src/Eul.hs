@@ -19,16 +19,16 @@ type PC p      = Unsigned p
 type Ram m     = Unsigned m
 
 data Instr n m
-  = Add    (Addr n) (Addr n) (Addr n)
-  | Sub    (Addr n) (Addr n) (Addr n)
-  | Mul    (Addr n) (Addr n) (Addr n)
-  | LoadIH (Addr n) Imm
-  | LoadIL (Addr n) Imm
-  | Bne    (Addr n) (Addr n) (Addr n)
-  | Mov    (Addr n) (Addr n)
-  | Get    (Addr n)
-  | Load   (Addr n) (Ram m)
-  | Store  (Addr n) (Ram m)
+  = Add   (Addr n) (Addr n) (Addr n)
+  | Sub   (Addr n) (Addr n) (Addr n)
+  | Mul   (Addr n) (Addr n) (Addr n)
+  | ImmH  (Addr n) Imm
+  | ImmL  (Addr n) Imm
+  | Bne   (Addr n) (Addr n) (Addr n)
+  | Mov   (Addr n) (Addr n)
+  | Get   (Addr n)
+  | Load  (Addr n) (Ram m)
+  | Store (Addr n) (Ram m)
   | Nop
 
 data Eul n m = Eul
@@ -118,8 +118,8 @@ execute ack ldReg = do
     Add    a b c -> replace c $ (r !! a) + (r !! b)
     Sub    a b c -> replace c $ (r !! a) - (r !! b)
     Mul    a b c -> replace c $ (r !! a) * (r !! b)
-    LoadIH a i   -> replace a $ i ++# getLower (r !! a)
-    LoadIL a i   -> replace a $ getHigher (r !! a) ++# i
+    ImmH a i   -> replace a $ i ++# getLower (r !! a)
+    ImmL a i   -> replace a $ getHigher (r !! a) ++# i
     Mov    a b   -> replace b $ r !! a
     _  -> id
   memir .= instr
@@ -162,8 +162,8 @@ decode bs = case slice d31 d28 bs of
   0 -> Add    addr1 addr2 addr3
   1 -> Sub    addr1 addr2 addr3
   2 -> Mul    addr1 addr2 addr3
-  3 -> LoadIH addr1 imm
-  4 -> LoadIL addr1 imm
+  3 -> ImmH addr1 imm
+  4 -> ImmL addr1 imm
   5 -> Bne    addr1 addr2 addr3
   6 -> Mov    addr1 addr2
   7 -> Get    addr1
@@ -182,8 +182,8 @@ encode = \case
   Add    addr1 addr2 addr3 -> 0b0000 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
   Sub    addr1 addr2 addr3 -> 0b0001 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
   Mul    addr1 addr2 addr3 -> 0b0010 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
-  LoadIH addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
-  LoadIL addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  ImmH addr1 imm         -> 0b0011 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
+  ImmL addr1 imm         -> 0b0100 ++# pack addr1 ++# (0 :: BitVector 9) ++# imm
   Bne    addr1 addr2 addr3 -> 0b0101 ++# pack addr1 ++# pack addr2 ++# pack addr3 ++# (0 :: BitVector 19)
   Mov    addr1 addr2       -> 0b0110 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 22)
   Get    addr1             -> 0b0111 ++# pack addr1 ++# (0 :: BitVector 25)
@@ -192,19 +192,19 @@ encode = \case
   Nop                      -> 0b1111 ++# (0 :: BitVector 28)
 
 prog :: Vec 4 (Instr 8 10)
-prog =  LoadIL 0 5
-     :> LoadIL 1 7
+prog =  ImmL 0 5
+     :> ImmL 1 7
      :> Add  0 1 2
      :> Get  2
      :> Nil
 
 fib :: Vec 13 (Instr 8 10)
-fib =  LoadIL 0 29 -- nth  fibonacci number 10 -> r0
-    :> LoadIL 1 0  -- prev prev              0 -> r1
-    :> LoadIL 2 1  -- prev                   1 -> r2
-    :> LoadIL 3 2  -- i                      2 -> r3
-    :> LoadIL 4 1  -- increment              1 -> r4
-    :> LoadIL 5 6  -- loop begin addr        7 -> r5
+fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
+    :> ImmL 1 0  -- prev prev              0 -> r1
+    :> ImmL 2 1  -- prev                   1 -> r2
+    :> ImmL 3 2  -- i                      2 -> r3
+    :> ImmL 4 1  -- increment              1 -> r4
+    :> ImmL 5 6  -- loop begin addr        7 -> r5
     :> Add 1 2 6 -- prev prev + prev r1 + r2 -> r6 LOOP BEGIN
     :> Mov 2 1   -- prev -> prev prev     r2 -> r1
     :> Mov 6 2   -- fib -> prev           r6 -> r2
@@ -215,9 +215,9 @@ fib =  LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> Nil
 
 ramTest :: Vec 12 (Instr 8 10)
-ramTest =  LoadIL 0 5
+ramTest =  ImmL 0 5
         :> Store 0 200
-        :> LoadIL 0 4
+        :> ImmL 0 4
         :> Store 0 201
         :> Load 0 200
         :> Load 1 201
@@ -226,8 +226,8 @@ ramTest =  LoadIL 0 5
         :> Nil ++ jmpBegin
 
 ramReadNew :: Vec 10 (Instr 8 10)
-ramReadNew =  LoadIL 0 5
-           :> LoadIL 1 3
+ramReadNew =  ImmL 0 5
+           :> ImmL 1 3
            :> Add 0 1 2
            :> Store 2 200
            :> Load 0 200
@@ -235,8 +235,8 @@ ramReadNew =  LoadIL 0 5
            :> Nil ++ jmpBegin
 
 jmpBegin :: Vec 4 (Instr 8 10)
-jmpBegin =  LoadIL 0 0
-         :> LoadIL 1 1
-         :> LoadIL 2 0
+jmpBegin =  ImmL 0 0
+         :> ImmL 1 1
+         :> ImmL 2 0
          :> Bne 0 1 2 -- Loop Back to Beginning
          :> Nil
