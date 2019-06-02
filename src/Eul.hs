@@ -98,15 +98,11 @@ eulT s (ack, pcValue, rdValue) = flip execState s $ do
 fetch ::Bool -> Maybe (PC 10) -> Instr 8 10 -> State (Eul 8 10) ()
 fetch stall branch pcValue = unless stall $ do
   pc %= updatePC branch pcValue
-  ir <- use exir
-  exir .= bool pcValue Nop (isJust branch || isGet ir)
+  exir .= bool pcValue Nop (isJust branch)
   where
     updatePC (Just b) _ = const b
     updatePC _ (Get _) = id
     updatePC _  _ = (+1)
-    isGet = \case
-      Get _ -> True
-      _ -> False
 
 execute
    :: (KnownNat n, KnownNat m)
@@ -195,23 +191,20 @@ encode = \case
   Store  addr1 imm         -> 0b1001 ++# pack addr1 ++# (0 :: BitVector 15) ++# pack imm
   Nop                      -> 0b1111 ++# (0 :: BitVector 28)
 
-prog :: Vec 10 (Instr 8 10)
-prog =  Nop
-     :> LoadIL 0 5
+prog :: Vec 4 (Instr 8 10)
+prog =  LoadIL 0 5
      :> LoadIL 1 7
      :> Add  0 1 2
      :> Get  2
-     :> Nop
-     :> Nil ++ jmpBegin
+     :> Nil
 
-fib :: Vec 14 (Instr 8 10)
-fib =  Nop
-    :> LoadIL 0 29 -- nth  fibonacci number 10 -> r0
+fib :: Vec 13 (Instr 8 10)
+fib =  LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> LoadIL 1 0  -- prev prev              0 -> r1
     :> LoadIL 2 1  -- prev                   1 -> r2
     :> LoadIL 3 2  -- i                      2 -> r3
     :> LoadIL 4 1  -- increment              1 -> r4
-    :> LoadIL 5 7  -- loop begin addr        7 -> r5
+    :> LoadIL 5 6  -- loop begin addr        7 -> r5
     :> Add 1 2 6 -- prev prev + prev r1 + r2 -> r6 LOOP BEGIN
     :> Mov 2 1   -- prev -> prev prev     r2 -> r1
     :> Mov 6 2   -- fib -> prev           r6 -> r2
@@ -221,9 +214,8 @@ fib =  Nop
     :> Get 2     -- spi write
     :> Nil
 
-ramTest :: Vec 13 (Instr 8 10)
-ramTest =  Nop
-        :> LoadIL 0 5
+ramTest :: Vec 12 (Instr 8 10)
+ramTest =  LoadIL 0 5
         :> Store 0 200
         :> LoadIL 0 4
         :> Store 0 201
@@ -233,9 +225,8 @@ ramTest =  Nop
         :> Get 2
         :> Nil ++ jmpBegin
 
-ramReadNew :: Vec 11 (Instr 8 10)
-ramReadNew =  Nop
-           :> LoadIL 0 5
+ramReadNew :: Vec 10 (Instr 8 10)
+ramReadNew =  LoadIL 0 5
            :> LoadIL 1 3
            :> Add 0 1 2
            :> Store 2 200
