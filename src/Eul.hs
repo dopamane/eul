@@ -3,7 +3,7 @@ module Eul where
 
 import Clash.Prelude
 
-import Control.Lens ( makeLenses, use, (^.), (.=), (%=) )
+import Control.Lens ( makeLenses, use, uses, (^.), (.=), (%=) )
 import Control.Monad.State
 import Data.Maybe ( isJust, isNothing, fromMaybe )
 import Data.Bool ( bool )
@@ -107,8 +107,6 @@ eulO s ramValue r1 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3, re
       Add   a _ _ -> a
       Sub   a _ _ -> a
       Mul   a _ _ -> a
-      ImmH  a _   -> a
-      ImmL  a _   -> a
       Bne   a _ _ -> a
       Mov   a _   -> a
       Get   a     -> a
@@ -139,7 +137,9 @@ eulS
   -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
   -> Eul 3 10
 eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
-  memBranch <- memory
+  memBranch <- uses memir $ \case
+    Bne{} -> True
+    _ -> False
   (exBranch, stall) <- execute ack regRds spiRx
   fetch stall exBranch memBranch $ decode pcValue
 
@@ -165,8 +165,8 @@ execute ack (r1, r2, r3) spiRx = do
     Add{} -> r1 + r2
     Sub{} -> r1 - r2
     Mul{} -> r1 * r2
-    ImmH _ i -> i ++# getLower r1
-    ImmL _ i -> getHigher r1 ++# i
+    ImmH _ i -> i ++# 0
+    ImmL _ i -> 0 ++# i
     Mov{} -> r1
     Put _ -> fromMaybe 0 spiRx
     Store{} -> r1
@@ -177,16 +177,6 @@ execute ack (r1, r2, r3) spiRx = do
     Get _ | not ack -> (Nothing, True)
     Put _ | isNothing spiRx -> (Nothing, True)
     _  -> (Nothing, False)
-  where
-    getHigher = slice d31 d16
-    getLower  = slice d15 d0
-
-memory :: State (Eul n m) Bool
-memory = do
-  ir <- use memir
-  return $ case ir of
-    Bne{} -> True
-    _ -> False
 
 regBank
   :: HiddenClockReset dom gated sync
