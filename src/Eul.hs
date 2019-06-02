@@ -204,7 +204,7 @@ prog =  Nop
      :> Nop
      :> Nil ++ jmpBegin
 
-fib :: Vec 15 (Instr 8 10)
+fib :: Vec 14 (Instr 8 10)
 fib =  Nop
     :> LoadIL 0 29 -- nth  fibonacci number 10 -> r0
     :> LoadIL 1 0  -- prev prev              0 -> r1
