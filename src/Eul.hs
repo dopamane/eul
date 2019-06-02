@@ -188,9 +188,22 @@ regBank
   -> Signal dom (Reg, Reg, Reg)
 regBank regAddr1 regAddr2 regAddr3 regWrM = bundle (regRd1, regRd2, regRd3)
   where
-    regRd1 = readNew asyncRamPow2 regAddr1 regWrM
-    regRd2 = readNew asyncRamPow2 regAddr2 regWrM
-    regRd3 = readNew asyncRamPow2 regAddr3 regWrM
+    regRd1 = regFile regAddr1 regWrM
+    regRd2 = regFile regAddr2 regWrM
+    regRd3 = regFile regAddr3 regWrM
+
+regFile
+  :: HiddenClockReset dom gated sync
+  => KnownNat n
+  => Signal dom (Addr n)
+  -> Signal dom (Maybe (Addr n, Reg))
+  -> Signal dom Reg
+regFile rd wrM = mux writeThrough writeValue rdValue
+  where
+    rdValue = asyncRamPow2 rd wrM
+    writeThrough = (Just <$> rd) .==. (fmap fst <$> wrM)
+    writeValue = maybe 0 snd <$> wrM
+
 
 {- OPCODE :: BitVector 4
 Add   => 0
@@ -229,8 +242,8 @@ decode bs = case slice d31 d28 bs of
     addr1 = unpack $ slice d27 d25 bs
     addr2 = unpack $ slice d24 d22 bs
     addr3 = unpack $ slice d21 d19 bs
-    imm   = slice d15 d0 bs
-    mem   = unpack $ slice d9  d0 bs
+    imm = slice d15 d0 bs
+    mem = unpack $ slice d9 d0 bs
 
 encode :: Instr 3 10 -> Reg
 encode = \case
