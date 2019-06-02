@@ -101,7 +101,8 @@ fetch stall branch pcValue = unless stall $ do
   exir .= bool pcValue Nop (isJust branch)
   where
     updatePC (Just b) _ = const b
-    updatePC _ (Get _) = id
+    updatePC _ Get{} = id
+    updatePC _ Bne{} = id
     updatePC _  _ = (+1)
 
 execute
