@@ -306,15 +306,26 @@ ramTest =  ImmL 0 5   -- set value 5 := r0
         :> Get 2
         :> Nil
 
-ramReadNew :: Vec 7 (Instr 4)
-ramReadNew =  ImmL 0 5
-           :> ImmL 1 3
-           :> Add 0 1 2
-           :> ImmL 3 200
-           :> Store 2 3
-           :> Load 0 3
-           :> Get 0
-           :> Nil
+ramRAW :: Vec 7 (Instr 4)
+ramRAW =  ImmL 0 5
+       :> ImmL 1 3
+       :> Add 0 1 2
+       :> ImmL 3 200
+       :> Store 2 3
+       :> Load 0 3
+       :> Get 0
+       :> Nil
+
+ramWAR :: Vec 8 (Instr 4)
+ramWAR =  ImmL 0 2   -- 2   -> r0
+       :> ImmL 1 250 -- 250 -> r1
+       :> ImmL 2 3   -- 3   -> r2
+       :> Store 0 1  -- r0  -> mem[r1]
+       :> Load 0 1   -- mem[r1] -> r0
+       :> Store 2 1  -- r2 -> mem[r1]
+       :> Load 0 1   -- mem[r1] -> r0
+       :> Get 0
+       :> Nil
 
 jmpBegin :: Vec 4 (Instr 4)
 jmpBegin =  ImmL 0 0
