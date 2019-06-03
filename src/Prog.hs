@@ -41,10 +41,10 @@ progAdd
 main :: IO ()
 main = do
   writeBulkByte ([0x00, 0x00] ++ encodeWord16 (fromIntegral $ length progMult)) -- write prog size
-  threadDelay 100
+  threadDelay 1000
   forM_ progMult $ \instr -> do -- write prog instructions
     writeBulkByte (encodeInstr instr)
-    threadDelay 100
+    threadDelay 1000
   threadDelay 1000
   readBulkByte 4 -- read prog result
 
