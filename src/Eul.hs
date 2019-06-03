@@ -58,7 +58,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode sumN ++ repeat 0
+    ramContent = map encode prog ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
@@ -299,8 +299,8 @@ sumN =  Put 0  -- n
 prog :: Vec 4 (Instr 4)
 prog =  ImmL 0 5
      :> ImmL 1 7
-     :> Add  0 1 2
-     :> Get  2
+     :> Add  0 1 0
+     :> Get  0
      :> Nil
 
 putTest :: Vec 4 (Instr 4)
