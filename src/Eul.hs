@@ -58,7 +58,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode putTest ++ repeat 0
+    ramContent = map encode ramRAW ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
@@ -313,7 +313,7 @@ ramRAW =  ImmL 0 5
        :> ImmL 3 200
        :> Store 2 3
        :> Load 0 3
-       :> Get 0
+       :> Get 0      -- 8
        :> Nil
 
 ramWAR :: Vec 8 (Instr 4)
@@ -324,7 +324,7 @@ ramWAR =  ImmL 0 2   -- 2   -> r0
        :> Load 0 1   -- mem[r1] -> r0
        :> Store 2 1  -- r2 -> mem[r1]
        :> Load 0 1   -- mem[r1] -> r0
-       :> Get 0
+       :> Get 0      -- 3
        :> Nil
 
 jmpBegin :: Vec 4 (Instr 4)
