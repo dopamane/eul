@@ -58,7 +58,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode prog ++ repeat 0
+    ramContent = map encode putTest ++ repeat 0
 {-# NOINLINE topEntity #-}
 
 eul
@@ -279,13 +279,14 @@ davOS = Put 0      -- prog length -> r0      ; spi prog length
      :> Bne 13 14 15 -- jump to prog start
      :> Nil
 
-sumN :: Vec 14 (Instr 4)
-sumN =  Put 0  -- n
+sumN :: Vec 15 (Instr 4)
+sumN =  Put 0     -- n
      :> ImmL 1 1  -- inc
      :> ImmL 2 0  -- index
      :> ImmL 3 0  -- sum
      :> ImmL 4 5  -- loop begin addr
      :> Put 5     -- Loop BEGIN
+     :> Nop
      :> Add 5 3 3 -- r3 += input
      :> Add 2 1 2 -- index += 1
      :> Bne 2 0 4
@@ -304,7 +305,7 @@ prog =  ImmL 0 5
      :> Nil
 
 putTest :: Vec 4 (Instr 4)
-putTest =  ImmL 0 5
+putTest =  Put 0
         :> Put 1
         :> Add 0 1 2
         :> Get 2
