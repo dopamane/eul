@@ -261,6 +261,45 @@ encode = \case
   Store addr1 addr2       -> 0b1010 ++# pack addr1 ++# pack addr2 ++# (0 :: BitVector 20)
   Nop                     -> 0b1111 ++# (0 :: BitVector 28)
 
+davOS :: Vec 36 (Instr 4)
+davOS = Put 0      -- prog length -> r0      ; spi prog length
+     :> ImmL 6 200 --         200 -> r6      ; set program mem offset
+     :> ImmL 1 1   --           1 -> r1      ; inc
+     :> ImmL 2 0   --           0 -> r2      ; current instr
+     :> ImmL 4 5   --           5 -> r4      ; loop begin addr
+     :> Put 5      --  prog instr -> r5      ; read prog instr LOOP BEGIN
+     :> Add 6 2 7  --     r6 + r2 -> r7      ; addr to store instr
+     :> Store 5 7  --          r5 -> mem[r7] ; store instr
+     :> Add 1 2 3  --     r1 + r2 -> r3      ; inc instr count
+     :> Mov 3 2    --          r3 -> r2      ; set instr ptr+1
+     :> Bne 0 2 4  -- ; goto LOOP BEGIN if instr count /= prog length
+     :> Nop
+     :> ImmH 8 16384  -- ; set next instr to ImmL 0 0
+     :> Add 6 2 7     -- ; addr to store instr
+     :> Store 8 7     --      r8 -> mem[r7] ; store instr
+     :> Add 1 2 3     --                    ; inc instr count
+     :> Mov 3 2       --                    ; set instr ptr+1
+     :> ImmH 9 16640
+     :> ImmL 10 1
+     :> Add 9 10 11   -- set next instr to ImmL 1 1
+     :> Add 6 2 7     -- addr to store Instr
+     :> Store 11 7    -- store instr
+     :> Add 1 2 3     -- inc instr count
+     :> Mov 3 2       -- set instr ptr+1
+     :> ImmH 12 16896 -- set next instr to ImmL 2 0
+     :> Add 6 2 7     -- ; addr to store instr
+     :> Store 12 7    -- store instr
+     :> Add 1 2 3     -- inc instr count
+     :> Mov 3 2       -- set instr ptr+1
+     :> ImmH 13 20498 -- set next instr to Bne 0 1 2
+     :> Add 6 2 7     -- addr to store instr
+     :> Store 13 7    -- store instr
+     :> ImmL 13 0
+     :> ImmL 14 1
+     :> ImmL 15 200
+     :> Bne 13 14 15 -- jump to prog start
+     :> Nil
+
 prog :: Vec 4 (Instr 4)
 prog =  ImmL 0 5
      :> ImmL 1 7
