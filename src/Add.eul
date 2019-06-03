@@ -2,3 +2,7 @@ ImmL 0 4
 ImmL 1 4
 Add 0 1 2
 Get 2
+ImmL 0 0
+ImmL 1 1
+ImmL 2 0
+Bne 0 1 2
