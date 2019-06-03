@@ -34,7 +34,7 @@ data Instr n
 data Eul n m = Eul
   { _exir     :: Instr n
   , _memir    :: Instr n
-  , _regWrite :: (Reg, Reg)
+  , _regWrite :: Reg
   , _pc       :: PC m
   }
 makeLenses ''Eul
@@ -72,9 +72,9 @@ eul ramContent sck ss mosi = miso
   where
     (miso, ack, spiRx) = spiWorker txLd sck ss mosi
     (txLd, pcAddr, rdAddr, wrM, regAddr1, regAddr2, regAddr3, regWrM) = mealyB eulT initial (ack, pcValue, rdValue, spiRx, regRds)
-    initial = Eul Nop Nop (0,0) 0
-    rdValue = readNew (blockRamPow2 ramContent) rdAddr wrM
-    pcValue = readNew (blockRamPow2 ramContent) pcAddr wrM
+    initial = Eul Nop Nop 0 0
+    rdValue = blockRamPow2 ramContent rdAddr wrM
+    pcValue = blockRamPow2 ramContent pcAddr wrM
     regRds = regBank regAddr1 regAddr2 regAddr3 regWrM
 
 eulT
@@ -101,8 +101,8 @@ eulO s ramValue r1 r2 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3,
     rdAddr = case s^.exir of
       Load _ _ -> unpack $ resize r2
       _ -> 0
-    wrM = case s^.memir of
-      Store _ _ -> Just (unpack $ resize $ s^.regWrite._2, s^.regWrite._1)
+    wrM = case s^.exir of
+      Store _ _ -> Just (unpack $ resize r2, r1)
       _ -> Nothing
     regAddr1 = case s^.exir of
       Add   a _ _ -> a
@@ -125,13 +125,13 @@ eulO s ramValue r1 r2 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3,
       Bne _ _ c -> c
       _         -> 0
     regWrM = case s^.memir of
-      Add _ _ c -> Just (c, s^.regWrite._1)
-      Sub _ _ c -> Just (c, s^.regWrite._1)
-      Mul _ _ c -> Just (c, s^.regWrite._1)
-      ImmH a _  -> Just (a, s^.regWrite._1)
-      ImmL a _  -> Just (a, s^.regWrite._1)
-      Mov _ b   -> Just (b, s^.regWrite._1)
-      Put a     -> Just (a, s^.regWrite._1)
+      Add _ _ c -> Just (c, s^.regWrite)
+      Sub _ _ c -> Just (c, s^.regWrite)
+      Mul _ _ c -> Just (c, s^.regWrite)
+      ImmH a _  -> Just (a, s^.regWrite)
+      ImmL a _  -> Just (a, s^.regWrite)
+      Mov _ b   -> Just (b, s^.regWrite)
+      Put a     -> Just (a, s^.regWrite)
       Load a _  -> Just (a, ramValue)
       _         -> Nothing
 
@@ -165,15 +165,14 @@ execute
 execute ack (r1, r2, r3) spiRx = do
   instr <- use exir
   regWrite .= case instr of
-    Add{}    -> (r1 + r2, 0)
-    Sub{}    -> (r1 - r2, 0)
-    Mul{}    -> (r1 * r2, 0)
-    ImmH _ i -> (i ++# 0, 0)
-    ImmL _ i -> (0 ++# i, 0)
-    Mov{}    -> (r1, 0)
-    Put _    -> (fromMaybe 0 spiRx, 0)
-    Store{}  -> (r1, r2)
-    _        -> (0, 0)
+    Add{}    -> r1 + r2
+    Sub{}    -> r1 - r2
+    Mul{}    -> r1 * r2
+    ImmH _ i -> i ++# 0
+    ImmL _ i -> 0 ++# i
+    Mov{}    -> r1
+    Put _    -> fromMaybe 0 spiRx
+    _        -> 0
   memir .= instr
   return $ case instr of
     Bne{} | r1 /= r2 -> (Just $ unpack $ resize r3, False)
