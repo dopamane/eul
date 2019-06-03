@@ -48,7 +48,7 @@ main = do
   threadDelay 1000
   readBulkByte 4 -- read prog result
 
-packBits:: (Num b, Foldable t, Bits b) => t b -> b
+packBits :: (Num b, Foldable t, Bits b) => t b -> b
 packBits = foldl go 0
   where go acc i = (acc `shiftL` 1) .|. i
 
