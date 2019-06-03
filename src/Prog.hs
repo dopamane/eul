@@ -39,13 +39,14 @@ progAdd
     ]
 
 main :: IO ()
-main = forM_ progMult $ \instr -> do
-  writeBulkByte (encodeInstr instr)
+main = do
+  writeBulkByte ([0x00, 0x00] ++ encodeWord16 (fromIntegral $ length progMult)) -- write prog size
   threadDelay 100
-  case instr of
-    Get _ -> readBulkByte 4
-    _     -> return ()
-  threadDelay 100
+  forM_ progMult $ \instr -> do -- write prog instructions
+    writeBulkByte (encodeInstr instr)
+    threadDelay 100
+  threadDelay 1000
+  readBulkByte 4 -- read prog result
 
 packBits:: (Num b, Foldable t, Bits b) => t b -> b
 packBits = foldl go 0
