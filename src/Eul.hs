@@ -312,12 +312,12 @@ prog =  ImmL 0 5
      :> Nil
 
 putTest :: Vec 10 (Instr 4)
-putTest =  Put 0
+putTest =  Nop
+        :> Put 0
+        :> Nop
         :> Put 1
-        :> Put 3
         :> Add 0 1 2
         :> Get 2
-        :> Get 3
         :> Nil ++ jmpBegin
 
 fib :: Vec 13 (Instr 4)
