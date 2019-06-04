@@ -306,7 +306,7 @@ prog =  ImmL 0 5
 
 putTest :: Vec 4 (Instr 4)
 putTest =  Put 0
-        :> Put 1
+        :> ImmL 1 5
         :> Add 0 1 2
         :> Get 2
         :> Nil
