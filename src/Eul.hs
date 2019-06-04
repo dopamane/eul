@@ -311,8 +311,9 @@ prog =  ImmL 0 5
      :> Get  0
      :> Nil
 
-putTest :: Vec 11 (Instr 4)
+putTest :: Vec 12 (Instr 4)
 putTest =  Nop
+        :> Nop
         :> Put 0
         :> Put 1
         :> Put 3
