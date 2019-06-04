@@ -144,11 +144,11 @@ eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
   memBranch <- uses memir $ \case
     Bne{} -> True
     _ -> False
-  (exBranch, stall) <- execute ack regRds spiRx
-  fetch stall exBranch memBranch $ decode pcValue
+  (exBranch, exGetPut, stall) <- execute ack regRds spiRx
+  fetch stall exBranch memBranch exGetPut $ decode pcValue
 
-fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 4 -> State (Eul 4 10) ()
-fetch stall exBranch memBranch pcValue = if stall
+fetch ::Bool -> Maybe (PC 10) -> Bool -> Bool -> Instr 4 -> State (Eul 4 10) ()
+fetch stall exBranch memBranch exGetPut pcValue = if stall
   then do
     prevPC <- use pc'
     pc .= prevPC
@@ -156,7 +156,7 @@ fetch stall exBranch memBranch pcValue = if stall
     nextPC <- use pc
     pc' .= nextPC
     pc %= updatePC exBranch pcValue
-    exir .= bool pcValue Nop (isJust exBranch || memBranch)
+    exir .= bool pcValue Nop (isJust exBranch || memBranch || exGetPut)
   where
     updatePC (Just b) _ = const b
     updatePC _ _ = (+1)
@@ -166,7 +166,7 @@ execute
    => Bool
    -> (Reg, Reg, Reg)
    -> Maybe Reg
-   -> State (Eul n m) (Maybe (PC m), Bool)
+   -> State (Eul n m) (Maybe (PC m), Bool, Bool)
 execute ack (r1, r2, r3) spiRx = do
   instr <- use exir
   regWrite .= case instr of
@@ -180,10 +180,12 @@ execute ack (r1, r2, r3) spiRx = do
     _        -> 0
   memir .= instr
   return $ case instr of
-    Bne{} | r1 /= r2 -> (Just $ unpack $ resize r3, False)
-    Get _ | not ack -> (Nothing, True)
-    Put _ | isNothing spiRx -> (Nothing, True)
-    _  -> (Nothing, False)
+    Bne{} | r1 /= r2 -> (Just $ unpack $ resize r3, False, False)
+    Get _ | not ack -> (Nothing, False, True)
+    Get _           -> (Nothing, True, False)
+    Put _ | isNothing spiRx -> (Nothing, False, True)
+    Put _                   -> (Nothing, True, False)
+    _  -> (Nothing, False, False)
 
 regBank
   :: HiddenClockReset dom gated sync
