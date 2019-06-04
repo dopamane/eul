@@ -36,6 +36,7 @@ data Eul n m = Eul
   , _memir    :: Instr n
   , _regWrite :: Reg
   , _pc       :: PC m
+  , _pc'      :: PC m
   }
 makeLenses ''Eul
 
@@ -72,7 +73,7 @@ eul ramContent sck ss mosi = miso
   where
     (miso, ack, spiRx) = spiWorker txLd sck ss mosi
     (txLd, pcAddr, rdAddr, wrM, regAddr1, regAddr2, regAddr3, regWrM) = mealyB eulT initial (ack, pcValue, rdValue, spiRx, regRds)
-    initial = Eul Nop Nop 0 0
+    initial = Eul Nop Nop 0 0 0
     rdValue = blockRamPow2 ramContent rdAddr wrM
     pcValue = blockRamPow2 ramContent pcAddr wrM
     regRds = regBank regAddr1 regAddr2 regAddr3 regWrM
@@ -147,15 +148,19 @@ eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
   fetch stall exBranch memBranch exGetPut $ decode pcValue
 
 fetch ::Bool -> Maybe (PC 10) -> Bool -> Bool -> Instr 4 -> State (Eul 4 10) ()
-fetch stall exBranch memBranch exGetPut pcValue = unless stall $ do
+fetch stall exBranch memBranch exGetPut pcValue = if stall
+  then do
+    curPC <- use pc'
+    pc .= curPC
+  else do
     let nextInstr = bool pcValue Nop $ isJust exBranch || memBranch || exGetPut
-    pc %= updatePC exBranch nextInstr
+    nextPC <- use pc
+    pc' .= nextPC
+    pc %= updatePC exBranch
     exir .= nextInstr
   where
-    updatePC (Just b) _ = const b
-    updatePC _ (Get _) = id
-    updatePC _ (Put _) = id
-    updatePC _ _ = (+1)
+    updatePC (Just b) = const b
+    updatePC _ = (+1)
 
 execute
    :: (KnownNat n, KnownNat m)
