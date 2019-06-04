@@ -148,11 +148,13 @@ eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
 
 fetch ::Bool -> Maybe (PC 10) -> Bool -> Bool -> Instr 4 -> State (Eul 4 10) ()
 fetch stall exBranch memBranch exGetPut pcValue = unless stall $ do
-  pc %= updatePC exBranch exGetPut
-  exir .= bool pcValue Nop (isJust exBranch || memBranch || exGetPut)
+    let nextInstr = bool pcValue Nop $ isJust exBranch || memBranch || exGetPut
+    pc %= updatePC exBranch nextInstr
+    exir .= nextInstr
   where
     updatePC (Just b) _ = const b
-    updatePC _ True = id
+    updatePC _ (Get _) = id
+    updatePC _ (Put _) = id
     updatePC _ _ = (+1)
 
 execute
