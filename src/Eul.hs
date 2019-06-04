@@ -310,14 +310,14 @@ prog =  ImmL 0 5
      :> ImmL 1 7
      :> Add  0 1 0
      :> Get  0
-     :> Nil
+     :> Nil 
 
-putTest :: Vec 4 (Instr 4)
+putTest :: Vec 8 (Instr 4)
 putTest =  Put 0
         :> Put 1
         :> Add 0 1 2
         :> Get 2
-        :> Nil
+        :> Nil ++ jmpBegin
 
 fib :: Vec 13 (Instr 4)
 fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
