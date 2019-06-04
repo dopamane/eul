@@ -153,11 +153,10 @@ fetch stall exBranch memBranch exGetPut pcValue = if stall
     curPC <- use pc'
     pc .= curPC
   else do
-    let nextInstr = bool pcValue Nop $ isJust exBranch || memBranch || exGetPut
     nextPC <- use pc
     pc' .= nextPC
     pc %= updatePC exBranch
-    exir .= nextInstr
+    exir .= bool pcValue Nop (isJust exBranch || memBranch || exGetPut)
   where
     updatePC (Just b) = const b
     updatePC _ = (+1)
@@ -310,13 +309,16 @@ prog =  ImmL 0 5
      :> ImmL 1 7
      :> Add  0 1 0
      :> Get  0
-     :> Nil 
+     :> Nil
 
-putTest :: Vec 8 (Instr 4)
-putTest =  Put 0
+putTest :: Vec 11 (Instr 4)
+putTest =  Nop
+        :> Put 0
         :> Put 1
+        :> Put 3
         :> Add 0 1 2
         :> Get 2
+        :> Get 3
         :> Nil ++ jmpBegin
 
 fib :: Vec 13 (Instr 4)
