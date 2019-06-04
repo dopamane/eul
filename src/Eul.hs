@@ -59,7 +59,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode putTest ++ repeat 0
+    ramContent = map encode $ putTest ++ repeat Nop
 {-# NOINLINE topEntity #-}
 
 eul
@@ -144,11 +144,11 @@ eulS s (ack, pcValue, _, spiRx, regRds) = flip execState s $ do
   memBranch <- uses memir $ \case
     Bne{} -> True
     _ -> False
-  (exBranch, stall) <- execute ack regRds spiRx
-  fetch stall exBranch memBranch $ decode pcValue
+  (exBranch, exGetPut, stall) <- execute ack regRds spiRx
+  fetch stall exBranch memBranch exGetPut $ decode pcValue
 
-fetch ::Bool -> Maybe (PC 10) -> Bool -> Instr 4 -> State (Eul 4 10) ()
-fetch stall exBranch memBranch pcValue = if stall
+fetch ::Bool -> Maybe (PC 10) -> Bool -> Bool -> Instr 4 -> State (Eul 4 10) ()
+fetch stall exBranch memBranch exGetPut pcValue = if stall
   then do
     curPC <- use pc'
     pc .= curPC
@@ -156,7 +156,7 @@ fetch stall exBranch memBranch pcValue = if stall
     nextPC <- use pc
     pc' .= nextPC
     pc %= updatePC exBranch
-    exir .= bool pcValue Nop (isJust exBranch || memBranch)
+    exir .= bool pcValue Nop (isJust exBranch || memBranch || exGetPut)
   where
     updatePC (Just b) = const b
     updatePC _ = (+1)
@@ -166,7 +166,7 @@ execute
    => Bool
    -> (Reg, Reg, Reg)
    -> Maybe Reg
-   -> State (Eul n m) (Maybe (PC m), Bool)
+   -> State (Eul n m) (Maybe (PC m), Bool, Bool)
 execute ack (r1, r2, r3) spiRx = do
   instr <- use exir
   regWrite .= case instr of
@@ -180,10 +180,12 @@ execute ack (r1, r2, r3) spiRx = do
     _        -> 0
   memir .= instr
   return $ case instr of
-    Bne{} | r1 /= r2 -> (Just $ unpack $ resize r3, False)
-    Get _ | not ack -> (Nothing, True)
-    Put _ | isNothing spiRx -> (Nothing, True)
-    _  -> (Nothing, False)
+    Bne{} | r1 /= r2 -> (Just $ unpack $ resize r3, False, False)
+    Get _ | not ack -> (Nothing, False, True)
+    Get _           -> (Nothing, True, False)
+    Put _ | isNothing spiRx -> (Nothing, False, True)
+    Put _                   -> (Nothing, True, False)
+    _  -> (Nothing, False, False)
 
 regBank
   :: HiddenClockReset dom gated sync
@@ -309,10 +311,8 @@ prog =  ImmL 0 5
      :> Get  0
      :> Nil
 
-putTest :: Vec 12 (Instr 4)
-putTest =  Nop
-        :> Nop
-        :> Put 0
+putTest :: Vec 10 (Instr 4)
+putTest =  Put 0
         :> Put 1
         :> Put 3
         :> Add 0 1 2
