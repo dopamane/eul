@@ -81,7 +81,7 @@ eul ramContent sck ss mosi = miso
 eulT
   :: Eul 4 10
   -> (Bool, Reg, Reg, Maybe Reg, (Reg, Reg, Reg))
-  -> (Eul 4 10, (Maybe Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 4, Addr 4, Addr 4, Maybe (Addr 4, Reg)))
+  -> (Eul 4 10, (Reg, PC 10, Ram 10, Maybe (Ram 10, Reg), Addr 4, Addr 4, Addr 4, Maybe (Addr 4, Reg)))
 eulT s i@(_, _, ramValue, _, (r1, r2, _)) = (s', o)
   where
     s' = eulS s i
@@ -93,12 +93,12 @@ eulO
   -> Reg
   -> Reg
   -> Reg
-  -> (Maybe Reg, PC m, Ram m, Maybe (Ram m, Reg), Addr n, Addr n, Addr n, Maybe (Addr n, Reg))
+  -> (Reg, PC m, Ram m, Maybe (Ram m, Reg), Addr n, Addr n, Addr n, Maybe (Addr n, Reg))
 eulO s ramValue r1 r2 = (txLd, s^.pc, rdAddr, wrM, regAddr1, regAddr2, regAddr3, regWrM)
   where
     txLd = case s^.exir of
-      Get _ -> Just r1
-      _ -> Nothing
+      Get _ -> r1
+      _ -> 0
     rdAddr = case s^.exir of
       Load _ _ -> unpack $ resize r2
       _ -> 0
