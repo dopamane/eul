@@ -59,7 +59,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode $ davOS ++ repeat Nop
+    ramContent = map encode $ prog ++ repeat Nop
 {-# NOINLINE topEntity #-}
 
 eul
@@ -303,23 +303,21 @@ sumN =  Put 0     -- n
      :> Bne 0 1 2 -- jump to start
      :> Nil
 
-prog :: Vec 4 (Instr 4)
+prog :: Vec 8 (Instr 4)
 prog =  ImmL 0 5
      :> ImmL 1 7
      :> Add  0 1 0
      :> Get  0
-     :> Nil
+     :> Nil ++ jmpBegin
 
-putTest :: Vec 10 (Instr 4)
-putTest =  Nop
-        :> Put 0
-        :> Nop
+putTest :: Vec 8 (Instr 4)
+putTest =  Put 0
         :> Put 1
         :> Add 0 1 2
         :> Get 2
         :> Nil ++ jmpBegin
 
-fib :: Vec 13 (Instr 4)
+fib :: Vec 17 (Instr 4)
 fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
     :> ImmL 1 0  -- prev prev              0 -> r1
     :> ImmL 2 1  -- prev                   1 -> r2
@@ -333,9 +331,9 @@ fib =  ImmL 0 29 -- nth  fibonacci number 10 -> r0
     :> Mov 7 3   --                       r7 -> r3
     :> Bne 3 0 5 -- goto LOOP BEGIN if i /= n
     :> Get 2     -- spi write
-    :> Nil
+    :> Nil ++ jmpBegin
 
-ramTest :: Vec 12 (Instr 4)
+ramTest :: Vec 16 (Instr 4)
 ramTest =  ImmL 0 5   -- set value 5 := r0
         :> ImmL 1 200 -- set mem addr 200 := r1
         :> Store 0 1  -- store 5 := mem[200]
@@ -348,9 +346,9 @@ ramTest =  ImmL 0 5   -- set value 5 := r0
         :> Load 1 2   -- load mem[201] -> r1
         :> Add 0 1 2
         :> Get 2
-        :> Nil
+        :> Nil ++ jmpBegin
 
-ramRAW :: Vec 7 (Instr 4)
+ramRAW :: Vec 11 (Instr 4)
 ramRAW =  ImmL 0 5
        :> ImmL 1 3
        :> Add 0 1 2
@@ -358,9 +356,9 @@ ramRAW =  ImmL 0 5
        :> Store 2 3
        :> Load 0 3
        :> Get 0      -- 8
-       :> Nil
+       :> Nil ++ jmpBegin
 
-ramWAR :: Vec 8 (Instr 4)
+ramWAR :: Vec 12 (Instr 4)
 ramWAR =  ImmL 0 2   -- 2   -> r0
        :> ImmL 1 250 -- 250 -> r1
        :> ImmL 2 3   -- 3   -> r2
@@ -369,7 +367,7 @@ ramWAR =  ImmL 0 2   -- 2   -> r0
        :> Store 2 1  -- r2 -> mem[r1]
        :> Load 0 1   -- mem[r1] -> r0
        :> Get 0      -- 3
-       :> Nil
+       :> Nil ++ jmpBegin
 
 jmpBegin :: Vec 4 (Instr 4)
 jmpBegin =  ImmL 0 0
