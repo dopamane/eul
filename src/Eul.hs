@@ -59,7 +59,7 @@ topEntity
 topEntity clk = withClockReset clk rst (eul ramContent)
   where
     rst = rstn d16 clk
-    ramContent = map encode $ prog ++ repeat Nop
+    ramContent = map encode $ davOS ++ repeat Nop
 {-# NOINLINE topEntity #-}
 
 eul
@@ -345,7 +345,7 @@ ramTest =  ImmL 0 5   -- set value 5 := r0
         :> ImmL 2 201 -- set mem addr 201 -> r2
         :> Load 1 2   -- load mem[201] -> r1
         :> Add 0 1 2
-        :> Get 2
+        :> Get 2      -- 9
         :> Nil ++ jmpBegin
 
 ramRAW :: Vec 11 (Instr 4)
