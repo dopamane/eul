@@ -29,11 +29,11 @@ main = do
   [fileName] <- getArgs
   prog <- parseProg <$> readFile fileName
   writeBulkByte ([0x00, 0x00] ++ encodeWord16 (fromIntegral $ length prog)) -- write prog size
-  threadDelay 1000
+  threadDelay 5000
   forM_ prog $ \instr -> do -- write prog instructions
     writeBulkByte (encodeInstr instr)
-    threadDelay 1000
-  threadDelay 1000
+    threadDelay 5000
+  threadDelay 20000
   readBulkByte 4 -- read prog result
 
 packBits :: (Num b, Foldable t, Bits b) => t b -> b
