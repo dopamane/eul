@@ -30,6 +30,7 @@ data Instr n
   | Load  (Addr n) (Addr n) -- r2 = mem addr
   | Store (Addr n) (Addr n) -- r1 = value, r2 = mem addr
   | Nop
+  deriving (Generic, NFDataX)
 
 data Eul n m = Eul
   { _exir     :: Instr n
@@ -38,6 +39,7 @@ data Eul n m = Eul
   , _pc       :: PC m
   , _pc'      :: PC m
   }
+  deriving (Generic, NFDataX)
 makeLenses ''Eul
 
 {-# ANN topEntity
@@ -51,19 +53,19 @@ makeLenses ''Eul
     , t_output = PortName "MISO"
     })#-}
 topEntity
-  :: Clock System 'Source -- clk
-  -> Signal System Bit    -- sck
-  -> Signal System Bool   -- ss
-  -> Signal System Bit    -- mosi
-  -> Signal System Bit    -- miso
-topEntity clk = withClockReset clk rst (eul ramContent)
+  :: Clock XilinxSystem         -- clk
+  -> Signal XilinxSystem Bit    -- sck
+  -> Signal XilinxSystem Bool   -- ss
+  -> Signal XilinxSystem Bit    -- mosi
+  -> Signal XilinxSystem Bit    -- miso
+topEntity clk = withClockResetEnable clk rst enableGen (eul ramContent)
   where
     rst = rstn d16 clk
     ramContent = map encode $ davOS ++ repeat Nop
 {-# NOINLINE topEntity #-}
 
 eul
-  :: HiddenClockReset dom gated sync
+  :: HiddenClockResetEnable dom
   => Vec (2^10) Reg
   -> Signal dom Bit
   -> Signal dom Bool
@@ -162,7 +164,7 @@ fetch stall exBranch memBranch exGetPut pcValue = if stall
     updatePC _ = (+1)
 
 execute
-   :: (KnownNat n, KnownNat m)
+   :: KnownNat m
    => Bool
    -> (Reg, Reg, Reg)
    -> Maybe Reg
@@ -188,8 +190,8 @@ execute ack (r1, r2, r3) spiRx = do
     _  -> (Nothing, False, False)
 
 regBank
-  :: HiddenClockReset dom gated sync
-  => (KnownNat n, 1 <= n)
+  :: HiddenClockResetEnable dom
+  => KnownNat n
   => Signal dom (Addr n)
   -> Signal dom (Addr n)
   -> Signal dom (Addr n)
@@ -202,7 +204,7 @@ regBank regAddr1 regAddr2 regAddr3 regWrM = bundle (regRd1, regRd2, regRd3)
     regRd3 = regFile regAddr3 regWrM
 
 regFile
-  :: HiddenClockReset dom gated sync
+  :: HiddenClockResetEnable dom
   => KnownNat n
   => Signal dom (Addr n)
   -> Signal dom (Maybe (Addr n, Reg))
@@ -212,7 +214,6 @@ regFile rd wrM = mux writeThrough writeValue rdValue
     rdValue = asyncRamPow2 rd wrM
     writeThrough = (Just <$> rd) .==. (fmap fst <$> wrM)
     writeValue = maybe 0 snd <$> wrM
-
 
 {- OPCODE :: BitVector 4
 Add   => 0
